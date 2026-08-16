@@ -971,12 +971,16 @@ RuntimeHost 在 `runProviderWithMemory` 中调用它生成 `assembledPrompt` 注
 
 ### 提交纪律（可回滚保障）
 
-- **每个功能一个 commit**：`feat(f1): 群聊支持`、`feat(f5): 情绪识别`…`git revert <commit>` 即完整移除该功能。
-- **公共扩展独立 commit**：C2（类型与解析扩展）单独 commit，**不要**混入任何功能消费逻辑——这样 revert 单个功能不会把公共字段一起删掉；若 revert C2 本身，各功能因字段可选而自动退化为 V1 行为（编译通过）。
+> QA 实测修正（docs/richcat-v2-qa-report.md §6）：逆序整体回滚（装配 commit → 各功能 → C0/C1/C2）全部干净零冲突；
+> 单独 revert 某个功能 commit 会因**装配 commit（install-features）仍引用该模块**而编译失败——正确做法见下方「回滚顺序」。
+
+- **每个功能一个 commit**：`feat(f1): 群聊支持`、`feat(f5): 情绪识别`…按 §5 回滚顺序 `git revert` 即完整移除该功能。
+- **公共扩展独立 commit**：C2（类型与解析扩展）单独 commit，**不要**混入任何功能消费逻辑——这样 revert 单个功能不会把公共字段一起删掉。
+- **回滚顺序（重要，QA 实测）**：先 revert 装配 commit（`feat(install)`，位于历史最顶），再按时间倒序 revert 各功能 commit，最后 revert C0/C1/C2。**C2 不可单独 revert**：F1/F5/F7 等功能的代码直接引用 `SmartReplyResult` 扩展字段与 `GroupChatContext`，单独 revert C2 会导致 typecheck 失败（实测 TS2305/TS2339），必须先回滚所有消费这些字段的功能。
 - **改动文件冲突预防**：
   - `session-types.ts` / `ai-client.ts`：每个功能字段用 `// ── Fx ──` 注释块隔开，避免 revert 时误删他功能字段。
   - `generic-channel-session.ts`：新增事件分支独立 case，不修改现有分支。
-  - `main/index.ts`：装配代码集中在 `registerFeatures()` 函数内（新函数），不散落各处。
+  - `main/index.ts`：装配代码集中在 `registerFeatures()`/`installFeatures()` 函数内（新函数），不散落各处。
 - **每个 commit 过 typecheck**：`npm run typecheck` 绿后再提交。
 
 ### 风险清单（QA 与工程师注意）

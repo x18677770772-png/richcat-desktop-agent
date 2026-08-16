@@ -148,13 +148,13 @@ void (async () => {
   const noRoute = await applyRoleRouting({ ...base, routeTo: undefined }, { stores: { persona: store } })
   check('路由执行: 无 routeTo → 原样', noRoute?.reply === base.reply)
 
-  const roleMsg = await applyRoleRouting({ ...base, messageKind: 'role_message', routeTo: { personaId: 'p-sales', confidence: 0.9 } }, { stores: { persona: store }, input })
+  const roleMsg = await applyRoleRouting({ ...base, messageKind: 'role_message', routeTo: { personaId: 'p-sales', reason: '角色间消息', confidence: 0.9 } }, { stores: { persona: store }, input })
   check('路由执行: role_message 不掺和（不二次生成）', roleMsg?.reply === base.reply && roleMsg?.routeTo !== undefined)
 
-  const lowConf = await applyRoleRouting({ ...base, routeTo: { personaId: 'p-sales', confidence: 0.3 } }, { stores: { persona: store }, input })
+  const lowConf = await applyRoleRouting({ ...base, routeTo: { personaId: 'p-sales', reason: '低置信度测试', confidence: 0.3 } }, { stores: { persona: store }, input })
   check('路由执行: 低置信度 → 原样', lowConf?.reply === base.reply)
 
-  const noRegen = await applyRoleRouting({ ...base, routeTo: { personaId: 'builtin-sales', confidence: 0.9 } }, { stores: { persona: store }, input })
+  const noRegen = await applyRoleRouting({ ...base, routeTo: { personaId: 'builtin-sales', reason: '测试用例', confidence: 0.9 } }, { stores: { persona: store }, input })
   check('路由执行: 未注入 regenerate → 采用第一段', noRegen?.reply === base.reply)
 
   // 注入 regenerate mock：用内置销售顾问（系统 prompt 含"销售"）
@@ -169,7 +169,7 @@ void (async () => {
 
   const failRegen = async (): Promise<SmartReplyResult | null> => null
   const fallback = await applyRoleRouting(
-    { ...base, routeTo: { personaId: 'builtin-sales', confidence: 0.9 } },
+    { ...base, routeTo: { personaId: 'builtin-sales', reason: '测试用例', confidence: 0.9 } },
     { stores: { persona: store }, input, regenerate: failRegen }
   )
   check('路由执行: 二次生成返回 null → 回退第一段（不报错）', fallback?.reply === base.reply)
@@ -178,13 +178,13 @@ void (async () => {
     throw new Error('mock 调用失败')
   }
   const fallback2 = await applyRoleRouting(
-    { ...base, routeTo: { personaId: 'builtin-sales', confidence: 0.9 } },
+    { ...base, routeTo: { personaId: 'builtin-sales', reason: '测试用例', confidence: 0.9 } },
     { stores: { persona: store }, input, regenerate: throwRegen }
   )
   check('路由执行: 二次生成抛错 → 回退第一段（不报错）', fallback2?.reply === base.reply)
 
   const f4off = await applyRoleRouting(
-    { ...base, routeTo: { personaId: 'builtin-sales', confidence: 0.9 } },
+    { ...base, routeTo: { personaId: 'builtin-sales', reason: '测试用例', confidence: 0.9 } },
     { stores: { persona: store }, input, regenerate: mockRegen, flags: flagsOf({ 'f4.role_routing': false }) }
   )
   check('路由执行: f4 关 → 原样返回（零影响）', f4off?.reply === base.reply)

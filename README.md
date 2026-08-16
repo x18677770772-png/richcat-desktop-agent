@@ -38,6 +38,17 @@
 - 🔍 **Pure-Vision RPA** — unread detection, clicking, typing and sending are all vision-driven; works with WeChat, WeCom, DingTalk, Feishu and other desktop apps
 - 🧠 **Working Memory** — every run accumulates experience cards; the system gets better at your business over time
 - 🔌 **Multi-Model Support** — chat and vision models are **independently configurable**: Volcengine Ark (Standard / Agent Plan), OpenAI, Zhipu GLM, Qwen, or any OpenAI-compatible endpoint
+- 🧩 **V2 Feature Suite** (every feature is **independently switchable**, zero impact when off, individually revertible):
+  - 💬 **Group Chat Support** (F1) — only replies to the customer themself or @-mentions; ignores group members / announcements / red packets
+  - 🙋 **Human Handoff** (F2) — detects "transfer to human / complaint / price-sensitive / unresolved-after-N-turns", pauses auto-reply and notifies a human
+  - 👑 **VIP Differentiated Service** (F3) — exclusive tone and knowledge for VIP customers based on their profile
+  - 🔀 **Multi-Role Routing** (F4) — routes messages to sales / after-sales / expert personas by question type in shared groups
+  - 😤 **Emotion / Risk Detection** (F5) — detects dissatisfaction / refund intent / complaints / urgency, auto-tags customers and alerts
+  - 📊 **Daily Service Report** (F6) — scheduled daily digest (default 23:50) of served customers / VIP activity / follow-ups / handoffs as Markdown
+  - ⏰ **Follow-Up Reminders** (F7) — turns promises like "I'll reply tomorrow" into tracked todos with due-date reminders
+  - 🖥 **Multi-Instance** (F8) — run several isolated instances via `--profile` (settings / customers / knowledge / reports fully separated)
+  - 📚 **Tiered Knowledge Base** (F9) — category / weight / scope (VIP, group-only) with on-demand injection instead of a flat 30-item dump
+  - 🎯 **Emotional-Value Prompt System** (F10) — unified professional + human + emotional-value prompt standards, revertible to legacy prompts
 
 ---
 
