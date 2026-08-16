@@ -58,13 +58,26 @@ export class LocalProvider implements ProviderAdapter {
     yield { type: 'thinking', content: this.buildThinkingMessage(input) }
 
     try {
-      const result = await this.aiClient.getSmartReply(input.screenshot, {
-        systemPrompt: this.context.getPersonaPrompt?.() ?? undefined,
-        knowledgeSection: this.context.getKnowledgeSection?.(),
-        customerSection: this.resolveCustomerSection(),
-        memoryCards: input.memoryCards,
-        imageContext: input.imageContext
-      })
+      // ── F10（C1）：优先使用 PromptAssembler 拼好的完整 system prompt ──
+      // assembledPrompt 已含全部注入段与输出格式段（docs §4.5 共 14 段），因此
+      // 置 appendOutputFormat=false 防止 getSmartReply 重复追加输出格式段；
+      // 未提供时走旧拼装路径（getPersonaPrompt + 知识/客户/记忆/图片段），向后兼容。
+      const assembled = input.assembledPrompt?.trim()
+      const result = await this.aiClient.getSmartReply(
+        input.screenshot,
+        assembled
+          ? { systemPrompt: assembled, appendOutputFormat: false }
+          : {
+              systemPrompt: this.context.getPersonaPrompt?.() ?? undefined,
+              knowledgeSection: this.context.getKnowledgeSection?.(),
+              customerSection: this.resolveCustomerSection(),
+              memoryCards: input.memoryCards,
+              imageContext: input.imageContext
+            }
+      )
+      if (assembled) {
+        console.log(`[LocalProvider] 使用 PromptAssembler 完整 prompt（${assembled.length} 字符）`)
+      }
 
       // 识别到联系人 → 更新缓存 + 回写客户档案
       if (result.contact) {

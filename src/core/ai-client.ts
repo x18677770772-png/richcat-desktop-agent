@@ -118,6 +118,9 @@ export class AIClient {
       memoryCards?: MemoryCardBrief[]
       /** 对方发来的图片内容（设备已点开大图读取的描述） */
       imageContext?: string
+      // ── F10（C1）：systemPrompt 已是 PromptAssembler 拼好的完整 prompt（含输出格式段）
+      //    时置 false，避免重复追加输出格式段（docs §4.5 要求无重复段）──
+      appendOutputFormat?: boolean
     }
   ): Promise<SmartReplyResult> {
     const startTime = Date.now()
@@ -134,7 +137,10 @@ export class AIClient {
       .filter((section) => section.trim().length > 0)
       .join('\n')
 
-    const smartPrompt = `${basePrompt}\n${sections}
+    const smartPrompt =
+      ctx?.appendOutputFormat === false
+        ? `${basePrompt}\n${sections}`
+        : `${basePrompt}\n${sections}
 
 ## 输出格式（必须严格遵守）
 以 JSON 格式输出，不要输出任何其他内容：
