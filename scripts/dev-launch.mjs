@@ -15,7 +15,10 @@ if (process.platform === 'win32') {
   }
 }
 
-const child = spawn('electron-vite', ['dev'], {
+// 透传 npm run dev -- --profile=xxx 之类的参数给 electron-vite（再透传给 Electron 主进程）
+const extraArgs = process.argv.slice(2)
+
+const child = spawn('electron-vite', ['dev', '--', ...extraArgs], {
   stdio: 'inherit',
   shell: true
 })

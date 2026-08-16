@@ -12,7 +12,16 @@
 import * as http from 'http'
 
 const PRIMARY_PORT = 12680
-const FALLBACK_PORT = 12681
+
+/** 按 profile 计算端口偏移（0-99），多开实例互不冲突 */
+function profilePortOffset(profile: string): number {
+  if (!profile) return 0
+  let hash = 0
+  for (let i = 0; i < profile.length; i++) {
+    hash = (hash * 31 + profile.charCodeAt(i)) >>> 0
+  }
+  return hash % 100
+}
 
 export type SkillStartReason =
   | 'no_vision_key'
@@ -214,12 +223,16 @@ async function requestHandler(req: http.IncomingMessage, res: http.ServerRespons
   }
 }
 
-export function startSkillServer(engineController: SkillEngineController): void {
+export function startSkillServer(engineController: SkillEngineController, profile?: string): void {
   if (server) {
     console.warn('[Skill Server] already started, skip')
     return
   }
   controller = engineController
+
+  // 多开实例按 profile 偏移端口（12680 + offset，fallback 再 +1）
+  const basePort = PRIMARY_PORT + profilePortOffset(profile || '')
+  const fallbackPort = basePort + 1
 
   server = http.createServer((req, res) => {
     requestHandler(req, res).catch((error) => {
@@ -235,18 +248,18 @@ export function startSkillServer(engineController: SkillEngineController): void 
   server.on('error', (err: NodeJS.ErrnoException) => {
     if (err.code === 'EADDRINUSE' && server) {
       console.warn(
-        `[Skill Server] 端口 ${PRIMARY_PORT} 被占用，尝试 fallback 端口 ${FALLBACK_PORT}`
+        `[Skill Server] 端口 ${basePort} 被占用，尝试 fallback 端口 ${fallbackPort}`
       )
-      server.listen(FALLBACK_PORT, '127.0.0.1', () => {
-        console.log(`[Skill Server] 已启动，监听 http://127.0.0.1:${FALLBACK_PORT}`)
+      server.listen(fallbackPort, '127.0.0.1', () => {
+        console.log(`[Skill Server] 已启动，监听 http://127.0.0.1:${fallbackPort}`)
       })
     } else {
       console.error('[Skill Server] 启动失败:', err)
     }
   })
 
-  server.listen(PRIMARY_PORT, '127.0.0.1', () => {
-    console.log(`[Skill Server] 已启动，监听 http://127.0.0.1:${PRIMARY_PORT}`)
+  server.listen(basePort, '127.0.0.1', () => {
+    console.log(`[Skill Server] 已启动，监听 http://127.0.0.1:${basePort}`)
   })
 }
 

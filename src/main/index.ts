@@ -48,6 +48,21 @@ import { KnowledgeStore, NewKnowledgeItem } from '../core/knowledge/knowledge-st
 import { CustomerStore, CustomerPatch } from '../core/customers/customer-store'
 const StoreClass = typeof Store === 'function' ? Store : ((Store as any).default as typeof Store)
 
+// ── 多开支持：--profile=<name> 数据隔离 ──
+// 每个 profile 使用独立的 userData 子目录（%APPDATA%/RichCat/profile-<name>），
+// 各自拥有独立的 settings / 客户档案 / 知识库 / 角色 / 轨迹，互不干扰。
+// 典型用法：同时服务多个微信账号 —— 每个微信实例配一个 profile。
+const PROFILE = (() => {
+  const arg = process.argv.find((a) => a.startsWith('--profile='))
+  if (!arg) return ''
+  // 白名单字符，防止路径注入
+  return arg.slice('--profile='.length).trim().replace(/[^a-zA-Z0-9_-]/g, '_')
+})()
+if (PROFILE) {
+  app.setPath('userData', join(app.getPath('userData'), `profile-${PROFILE}`))
+  console.log(`[RichCat] 多开模式：profile=${PROFILE}，数据目录=${app.getPath('userData')}`)
+}
+
 // ── 品牌升级：SightFlow → 财听猫 RichCat ──
 // 应用改名后 userData 目录（%APPDATA%/RichCat）与旧目录（%APPDATA%/sightflow-desktop-agent）
 // 不再相同。首次启动时把旧目录里的 settings / 客户档案 / 知识库 / 角色 / 轨迹等
@@ -55,9 +70,10 @@ const StoreClass = typeof Store === 'function' ? Store : ((Store as any).default
 // 注意：app.getPath('userData') 被调用时 Electron 会立即创建该目录（含 app name 子路径），
 // 因此必须先按 appData + app.getName() 推算新目录名，再判断“新目录是否已存在”，
 // 否则 existsSync 恒为 true，迁移永远不会执行。
+// 多开 profile 实例不做旧数据迁移（各自全新开始）。
 const OLD_USER_DATA_DIR = join(app.getPath('appData'), 'sightflow-desktop-agent')
 const NEW_USER_DATA_DIR = join(app.getPath('appData'), app.getName())
-if (OLD_USER_DATA_DIR !== NEW_USER_DATA_DIR) {
+if (!PROFILE && OLD_USER_DATA_DIR !== NEW_USER_DATA_DIR) {
   try {
     if (fs.existsSync(OLD_USER_DATA_DIR) && !fs.existsSync(NEW_USER_DATA_DIR)) {
       fs.cpSync(OLD_USER_DATA_DIR, NEW_USER_DATA_DIR, { recursive: true })
@@ -234,6 +250,7 @@ function createWindow(): void {
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 12, y: 12 },
     backgroundColor: '#0a0b10',
+    title: PROFILE ? `财听猫 RichCat · ${PROFILE}` : '财听猫 RichCat',
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -276,6 +293,7 @@ function createSettingsWindow(): void {
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 14, y: 14 },
     backgroundColor: '#0a0b10',
+    title: PROFILE ? `财听猫 RichCat · ${PROFILE} · 设置` : '财听猫 RichCat · 设置',
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -320,6 +338,7 @@ function createMemoryWindow(): void {
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hiddenInset',
+    title: PROFILE ? `财听猫 RichCat · ${PROFILE} · 工作记忆` : '财听猫 RichCat · 工作记忆',
     trafficLightPosition: { x: 14, y: 14 },
     backgroundColor: '#0a0b10',
     ...(process.platform === 'linux' ? { icon } : {}),
@@ -368,6 +387,7 @@ function createKnowledgeWindow(): void {
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 14, y: 14 },
     backgroundColor: '#0a0b10',
+    title: PROFILE ? `财听猫 RichCat · ${PROFILE} · 知识库` : '财听猫 RichCat · 知识库',
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -414,6 +434,7 @@ function createCustomerWindow(): void {
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 14, y: 14 },
     backgroundColor: '#0a0b10',
+    title: PROFILE ? `财听猫 RichCat · ${PROFILE} · 客户管理` : '财听猫 RichCat · 客户管理',
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -1050,7 +1071,7 @@ app.whenReady().then(async () => {
   })
 
   // ── Skill HTTP Server（OpenClaw 远程启动 / 暂停接入点） ──
-  startSkillServer(skillEngineController)
+  startSkillServer(skillEngineController, PROFILE)
 
   createWindow()
 

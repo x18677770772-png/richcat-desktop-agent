@@ -59,6 +59,20 @@ npm run build:mac     # macOS
 
 **On first launch:** pick your target app (WeChat / WeCom / DingTalk / Feishu …) → let VLM measure the layout automatically (or select regions manually) → enter your API key in Settings → start the engine and let it work.
 
+## 👥 Multi-Instance (Multi-Account)
+
+Run several instances side by side — each with its own settings, personas, knowledge base and customer data:
+
+```bash
+npm run dev -- --profile=shop     # instance A (e.g. shop account)
+npm run dev -- --profile=service  # instance B (e.g. service account)
+```
+
+- Each profile uses an isolated data directory (`%APPDATA%/RichCat/profile-<name>`)
+- Window titles show the profile name so you can tell instances apart
+- Skill-server ports are offset per profile automatically
+- Before starting the engine in an instance, bring its target chat window to the foreground — an instance only operates the currently active chat window
+
 ---
 
 ## ⚙️ Configuration
