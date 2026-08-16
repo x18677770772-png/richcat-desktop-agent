@@ -100,6 +100,10 @@ const FEATURE_META: FeatureMeta[] = [
 export default function FeaturePanel(): React.JSX.Element {
   const [flags, setFlags] = useState<Record<FeatureFlagKey, boolean> | null>(null)
   const [saving, setSaving] = useState<FeatureFlagKey | null>(null)
+  // F1 群聊参数（featuresConfig.f1；逗号分隔昵称 + 纯 @ 触发开关）
+  const [f1BotNames, setF1BotNames] = useState('')
+  const [f1MentionOnly, setF1MentionOnly] = useState(false)
+  const [f1Saving, setF1Saving] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -110,6 +114,18 @@ export default function FeaturePanel(): React.JSX.Element {
       })
       .catch((error: unknown) => {
         console.error('[FeaturePanel] features:getAll 失败:', error)
+      })
+    window.electron
+      ?.invoke('settings:getAll')
+      .then((settings) => {
+        if (!cancelled && settings?.featuresConfig?.f1) {
+          const f1 = settings.featuresConfig.f1 as { botNames?: string[]; mentionOnly?: boolean }
+          setF1BotNames((f1.botNames ?? []).join('、'))
+          setF1MentionOnly(Boolean(f1.mentionOnly))
+        }
+      })
+      .catch((error: unknown) => {
+        console.error('[FeaturePanel] settings:getAll 失败:', error)
       })
     return () => {
       cancelled = true
@@ -164,6 +180,33 @@ export default function FeaturePanel(): React.JSX.Element {
     }
   }, [flags])
 
+  /** 保存 F1 群聊参数（botNames 逗号分隔 + mentionOnly）；失败提示不阻塞 */
+  const saveF1Config = useCallback(
+    async (botNames: string, mentionOnly: boolean) => {
+      setF1Saving(true)
+      try {
+        const parsed = botNames
+          .split(/[,，、\s]+/)
+          .map((name) => name.trim())
+          .filter((name) => name.length > 0)
+        const result = (await window.electron?.invoke('settings:set', {
+          featuresConfig: { f1: { botNames: parsed, mentionOnly } }
+        })) as { success?: boolean } | undefined
+        if (result?.success) {
+          showToast('群聊参数已保存', 'success')
+        } else {
+          showToast('群聊参数保存失败', 'error')
+        }
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error)
+        showToast(`群聊参数保存失败：${message}`, 'error')
+      } finally {
+        setF1Saving(false)
+      }
+    },
+    []
+  )
+
   return (
     <div className="settings-page slide-up">
       <div className="settings-page-header">
@@ -202,6 +245,41 @@ export default function FeaturePanel(): React.JSX.Element {
                     </div>
                     <div className="feature-row-desc">{meta.description}</div>
                     {meta.note && <div className="feature-row-note">{meta.note}</div>}
+                    {meta.key === 'f1.group_chat' && (
+                      <div className="feature-row-config">
+                        <div className="feature-row-config-line">
+                          <label className="feature-row-config-label" htmlFor="f1-botnames">
+                            机器人昵称（逗号分隔，用于 @ 识别）
+                          </label>
+                          <input
+                            id="f1-botnames"
+                            className="form-input feature-row-config-input"
+                            type="text"
+                            value={f1BotNames}
+                            disabled={f1Saving}
+                            onChange={(e) => setF1BotNames(e.target.value)}
+                            onBlur={() => void saveF1Config(f1BotNames, f1MentionOnly)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') void saveF1Config(f1BotNames, f1MentionOnly)
+                            }}
+                            placeholder="如：财听猫、小财"
+                          />
+                        </div>
+                        <label className="feature-row-config-check">
+                          <input
+                            type="checkbox"
+                            checked={f1MentionOnly}
+                            disabled={f1Saving}
+                            onChange={(e) => {
+                              const next = e.target.checked
+                              setF1MentionOnly(next)
+                              void saveF1Config(f1BotNames, next)
+                            }}
+                          />
+                          纯 @ 触发模式（跳过 VLM 群聊检测，零检测成本）
+                        </label>
+                      </div>
+                    )}
                     <div className="feature-row-meta">
                       默认：{FEATURE_FLAG_DEFAULTS[meta.key] ? '开' : '关'} · {meta.key}
                     </div>

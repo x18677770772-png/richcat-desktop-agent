@@ -13,7 +13,7 @@
 // 记忆段——同一会话连续多轮时记忆持续生效；会话切换后的第一轮无该客户
 // 记忆注入（可接受），识别完成后缓存即更新，下一轮恢复记忆注入。
 
-import { AIClient, AIClientConfig } from './ai-client'
+import { AIClient, AIClientConfig, SmartReplyResult } from './ai-client'
 import { ProviderAdapter, ProviderEvent, ProviderInput } from './session-types'
 import { mkdir, writeFile } from 'node:fs/promises'
 import os from 'node:os'
@@ -29,6 +29,12 @@ export interface LocalProviderContext {
   getCustomerSection?: (contact: string) => string
   /** 回写客户长期记忆（contact 为 null 时不回写） */
   recordCustomerMemory?: (contact: string, summary: string, reply: string | null) => void
+  /**
+   * 每轮 getSmartReply 结果的后处理钩子（F1 后置过滤 / 后续 F2/F5/F7 消费入口）。
+   * 返回的 result 用于本轮发送判定与记忆回写；抛错被吞掉（记日志，不影响主链路）。
+   * flag 关闭时装配方传入的实现应立即原样返回 result（零影响）。
+   */
+  transformResult?: (result: SmartReplyResult, input: ProviderInput) => SmartReplyResult
 }
 
 export interface LocalProviderConfig {
@@ -79,27 +85,30 @@ export class LocalProvider implements ProviderAdapter {
         console.log(`[LocalProvider] 使用 PromptAssembler 完整 prompt（${assembled.length} 字符）`)
       }
 
+      // ── 结果后处理钩子（F1 后置过滤等；失败仅记日志，绝不影响发送判定）──
+      const finalResult = this.applyTransformResult(result, input)
+
       // 识别到联系人 → 更新缓存 + 回写客户档案
-      if (result.contact) {
-        const contact = result.contact
+      if (finalResult.contact) {
+        const contact = finalResult.contact
         if (contact !== this.lastContact) {
           this.lastContact = contact
           this.lastContactSection = this.context.getCustomerSection?.(contact) ?? ''
         }
         const summary =
-          result.summary?.trim() ||
-          (result.reply
-            ? `与${contact}的对话，回复：${result.reply.slice(0, 120)}`
+          finalResult.summary?.trim() ||
+          (finalResult.reply
+            ? `与${contact}的对话，回复：${finalResult.reply.slice(0, 120)}`
             : `与${contact}的对话，本轮无需回复`)
-        this.context.recordCustomerMemory?.(contact, summary, result.reply)
+        this.context.recordCustomerMemory?.(contact, summary, finalResult.reply)
       }
 
-      if (!result.reply) {
+      if (!finalResult.reply) {
         yield { type: 'skip' }
         return
       }
 
-      yield { type: 'reply_text', content: result.reply }
+      yield { type: 'reply_text', content: finalResult.reply }
     } catch (error: unknown) {
       yield {
         type: 'error',
@@ -129,6 +138,20 @@ export class LocalProvider implements ProviderAdapter {
 
   private resolveCustomerSection(): string {
     return this.lastContact ? this.lastContactSection : ''
+  }
+
+  /** 调用装配方注入的 transformResult；任何异常吞掉并记日志，返回原 result（不阻塞主链路） */
+  private applyTransformResult(
+    result: SmartReplyResult,
+    input: ProviderInput
+  ): SmartReplyResult {
+    if (!this.context.transformResult) return result
+    try {
+      return this.context.transformResult(result, input)
+    } catch (error) {
+      console.error('[LocalProvider] transformResult 钩子执行失败（忽略，使用原始结果）:', error)
+      return result
+    }
   }
 
   private buildThinkingMessage(input: ProviderInput): string {

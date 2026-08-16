@@ -5,7 +5,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { checkAndRequestPermissions } from './permission'
 import Store from 'electron-store'
-import { AIClient, buildKnowledgeSection } from '../core/ai-client'
+import { AIClient, buildKnowledgeSection, SmartReplyResult } from '../core/ai-client'
 import { LocalProvider } from '../core/local-provider'
 import { DesktopDevice } from '../core/device'
 import { RPADevice } from '../core/rpa-device'
@@ -40,7 +40,7 @@ import {
   TraceRecorder
 } from '../core/trace/trace-recorder'
 import { TraceStepInput } from '../core/trace/trace-types'
-import { ProviderAdapter } from '../core/session-types'
+import { ProviderAdapter, ProviderInput, GroupChatContext } from '../core/session-types'
 import { ExperienceStore, NewExperienceCard } from '../core/memory/experience-store'
 import { induceCardsFromSession } from '../core/memory/learn-from-session'
 import { PersonaStore, NewPersona } from '../core/persona/persona-store'
@@ -53,6 +53,10 @@ import {
   isFeatureFlagKey,
   normalizeFeatures
 } from '../core/features/flags'
+// ── F1 群聊支持（阶段 1）──
+import { createGroupChatFeature, GroupChatDetector } from '../core/features/group-chat'
+// ── F6 服务日报（阶段 2；装配层在 features/daily-report/install.ts，本文件仅两行接线）──
+import { installDailyReport } from '../core/features/daily-report/install'
 const StoreClass = typeof Store === 'function' ? Store : ((Store as any).default as typeof Store)
 
 // ── 多开支持：--profile=<name> 数据隔离 ──
@@ -120,6 +124,11 @@ interface AppSettings {
   capture: Partial<Record<AppType, PerAppCapture>>
   // V2 功能开关（白名单校验，见 src/core/features/flags.ts；缺失 key 用默认值）
   features: Partial<Record<FeatureFlagKey, boolean>>
+  // V2 功能专属配置（白名单归一化见 normalizeFeaturesConfig；缺失用默认值）
+  featuresConfig?: {
+    /** F1 群聊支持：机器人昵称列表 + 纯 @ 触发模式 */
+    f1?: { botNames?: string[]; mentionOnly?: boolean }
+  }
 }
 
 type ProviderConfigFieldType = 'text' | 'password' | 'url' | 'select' | 'textarea'
@@ -185,7 +194,8 @@ const settingsStore = new StoreClass({
       config: {}
     },
     defaultCaptureStrategy: 'auto',
-    capture: {}
+    capture: {},
+    featuresConfig: {}
   }
 })
 
@@ -197,6 +207,46 @@ const featureFlags = new FeatureFlags(
     settingsStore.set('features', flags)
   }
 )
+
+// ── F1 群聊检测器单例（懒创建；flag 关闭时不会被调用）──
+let groupChatDetectorInstance: GroupChatDetector | null = null
+function getGroupChatDetector(): GroupChatDetector {
+  if (!groupChatDetectorInstance) {
+    const settings = normalizeSettings(settingsStore.store)
+    const vision = resolveVisionConfig(settings)
+    const ai = new AIClient({
+      apiKey: vision.apiKey,
+      model: vision.model || FIXED_ARK_MODEL,
+      baseURL: vision.baseURL || FIXED_ARK_BASE_URL
+    })
+    groupChatDetectorInstance = new GroupChatDetector(ai, {
+      botNames: settings.featuresConfig?.f1?.botNames ?? [],
+      mentionOnly: settings.featuresConfig?.f1?.mentionOnly ?? false
+    })
+    console.log(
+      `[Main] GroupChatDetector 已创建（botNames=${(settings.featuresConfig?.f1?.botNames ?? []).join('、') || '无'}, mentionOnly=${settings.featuresConfig?.f1?.mentionOnly ?? false}）`
+    )
+  }
+  return groupChatDetectorInstance
+}
+
+/**
+ * F1 群聊上下文提供者：f1 flag 关闭 → 立即返回 undefined（零 VLM 调用、零影响）；
+ * 开启 → 调用检测器（失败由检测器内部兜底为 isGroup=false，不抛错）。
+ */
+function getGroupChatContextForSession(screenshot: string): Promise<GroupChatContext | undefined> {
+  if (!featureFlags.isEnabled('f1.group_chat')) {
+    return Promise.resolve(undefined)
+  }
+  return getGroupChatDetector().detect(screenshot)
+}
+
+/** F1 后置过滤（LocalProvider.transformResult 注入点）：仅 f1 开且为群聊时生效 */
+function filterF1GroupChatResult(result: SmartReplyResult, input: ProviderInput): SmartReplyResult {
+  const groupChat = input.groupChat
+  if (!featureFlags.isEnabled('f1.group_chat') || !groupChat?.isGroup) return result
+  return createGroupChatFeature().filterResult(result, groupChat)
+}
 
 let runtime: RuntimeHost<ReturnType<typeof createInitialGenericChannelState>> | null = null
 let runtimeDevice: DesktopDevice | null = null
@@ -1109,6 +1159,16 @@ app.whenReady().then(async () => {
   // ── Skill HTTP Server（OpenClaw 远程启动 / 暂停接入点） ──
   startSkillServer(skillEngineController, PROFILE)
 
+  // ── F6 服务日报装配（定时器仅 f6 flag 开时注册；before-quit 清理在 install 内部）──
+  installDailyReport({
+    flags: featureFlags,
+    getCustomerStore,
+    worktraceBaseDir,
+    listTraceSessions
+    // listFollowUps: () => getFollowUpStore().list({ status: 'open' }),  // F7 落地后接线
+    // listHandoffs: () => getHandoffStore().list({ status: 'open' }),    // F2 落地后接线
+  })
+
   createWindow()
 
   app.on('activate', function () {
@@ -1180,7 +1240,9 @@ async function startEngineCore(rawConfig?: any): Promise<SkillStartResult> {
             } catch (error) {
               console.error('[Main] 客户记忆回写失败:', error)
             }
-          }
+          },
+          // ── F1 群聊后置过滤（f1 关 → 原样返回，零影响）──
+          transformResult: filterF1GroupChatResult
         }
       })
     } else {
@@ -1272,6 +1334,8 @@ async function startEngineCore(rawConfig?: any): Promise<SkillStartResult> {
       getMemoryCards: () => getExperienceStore().getActiveCardBriefs(),
       getPersonaPrompt: () => getPersonaStore().getActivePersona()?.systemPrompt ?? null,
       getKnowledgeSection: () => buildKnowledgeSection(getKnowledgeStore().getInjectionItems()),
+      // ── F1 群聊检测（f1 关 → 立即返回 undefined，零 VLM 调用）──
+      getGroupChatContext: getGroupChatContextForSession,
       onSessionEnd: () => recorder.endSession()
     })
 
@@ -1489,6 +1553,29 @@ function resolveVisionConfig(
   }
 }
 
+/** V2 功能专属配置白名单归一化：未知功能丢弃，字段类型不符回退默认值 */
+function normalizeFeaturesConfig(raw: unknown): NonNullable<AppSettings['featuresConfig']> {
+  const out: NonNullable<AppSettings['featuresConfig']> = {}
+  if (!raw || typeof raw !== 'object') return out
+  const rec = raw as Record<string, unknown>
+
+  // F1 群聊支持：botNames 字符串数组（去空白/空项）+ mentionOnly 布尔
+  const f1Raw = rec.f1
+  if (f1Raw && typeof f1Raw === 'object') {
+    const f1 = f1Raw as Record<string, unknown>
+    const botNames = Array.isArray(f1.botNames)
+      ? f1.botNames
+          .filter((name): name is string => typeof name === 'string' && name.trim().length > 0)
+          .map((name) => name.trim())
+      : []
+    out.f1 = {
+      botNames,
+      mentionOnly: typeof f1.mentionOnly === 'boolean' ? f1.mentionOnly : false
+    }
+  }
+  return out
+}
+
 function normalizeSettings(raw: any): AppSettings {  const oldApiKey = typeof raw?.apiKey === 'string' ? raw.apiKey : ''
   const oldModel = typeof raw?.model === 'string' && raw.model ? raw.model : FIXED_ARK_MODEL
   const oldSystemPrompt = typeof raw?.systemPrompt === 'string' ? raw.systemPrompt : ''
@@ -1529,7 +1616,8 @@ function normalizeSettings(raw: any): AppSettings {  const oldApiKey = typeof ra
     },
     defaultCaptureStrategy: coerceStrategy(raw?.defaultCaptureStrategy, 'auto'),
     capture: normalizeCapture(raw?.capture),
-    features: normalizeFeatures(raw?.features)
+    features: normalizeFeatures(raw?.features),
+    featuresConfig: normalizeFeaturesConfig(raw?.featuresConfig)
   }
 }
 

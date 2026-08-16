@@ -1,6 +1,7 @@
 import {
   ChannelContext,
   ChannelSession,
+  GroupChatContext,
   ProviderAdapter,
   ProviderEvent,
   ProviderInput,
@@ -24,6 +25,12 @@ interface RuntimeHostOptions<TState> {
   getPersonaPrompt?: () => string | null
   /** 每轮 provider 调用前取知识库注入段（已格式化 markdown） */
   getKnowledgeSection?: () => string
+  /**
+   * F1：每轮 provider 调用前做群聊检测（flag 开启时由装配方注入实现；
+   * flag 关闭时装配方返回 undefined，本选项为 undefined 则完全跳过——零影响）。
+   * 检测失败/抛错被吞掉（按单聊处理），绝不影响主链路。
+   */
+  getGroupChatContext?: (screenshot: string) => Promise<GroupChatContext | undefined>
   /** 会话结束（含内部错误停止）时回调，用于收尾轨迹会话 */
   onSessionEnd?: () => void
 }
@@ -104,22 +111,35 @@ export class RuntimeHost<TState> {
     }
   }
 
-  /** provider 调用前注入工作记忆（经验卡片）、角色与知识库上下文 */
-  private runProviderWithMemory(input: ProviderInput): AsyncIterable<ProviderEvent> {
+  /** provider 调用前注入工作记忆（经验卡片）、角色、知识库与 F1 群聊上下文 */
+  private async *runProviderWithMemory(input: ProviderInput): AsyncIterable<ProviderEvent> {
     const cards = this.options.getMemoryCards?.() ?? []
     this.lastInjectedCardIds = cards.map((card) => card.cardId)
 
     const personaPrompt = this.options.getPersonaPrompt?.() ?? undefined
     const knowledgeSection = this.options.getKnowledgeSection?.() ?? undefined
 
+    // F1：群聊检测（flag 关 → 装配方返回 undefined；检测失败 → 吞掉按单聊处理）
+    let groupChat: GroupChatContext | undefined
+    if (this.options.getGroupChatContext) {
+      try {
+        groupChat = await this.options.getGroupChatContext(input.screenshot)
+      } catch (error) {
+        console.error('[RuntimeHost] 群聊检测异常（忽略，按单聊处理）:', error)
+      }
+    }
+
     const enriched: ProviderInput = {
       ...input,
       ...(cards.length ? { memoryCards: cards } : {}),
       ...(personaPrompt ? { personaPrompt } : {}),
-      ...(knowledgeSection ? { knowledgeSection } : {})
+      ...(knowledgeSection ? { knowledgeSection } : {}),
+      ...(groupChat ? { groupChat } : {})
     }
 
-    return this.options.provider.run(enriched)
+    for await (const event of this.options.provider.run(enriched)) {
+      yield event
+    }
   }
 
   private trace(step: TraceStepInput): void {
