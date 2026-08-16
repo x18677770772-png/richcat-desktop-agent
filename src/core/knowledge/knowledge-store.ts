@@ -16,6 +16,11 @@ import path from 'node:path'
 
 export type KnowledgeItemSource = 'manual' | 'import'
 
+// ── V2 扩展（F9：可选字段，旧数据兼容；缺失时行为=默认值）──
+// 设计文档：docs/richcat-v2-design.md §3-F9。回滚：revert F9 后本块字段不再被消费，
+// 旧 getInjectionItems() 行为完全不变。
+export type KnowledgeScope = 'all' | 'vip' | 'group'
+
 export interface KnowledgeItem {
   itemId: string
   /** 短标题，如「运费政策」 */
@@ -28,6 +33,12 @@ export interface KnowledgeItem {
   enabled: boolean
   createdAt: number
   updatedAt: number
+  /** F9：分类，如「售前/售后/物流/产品」 */
+  category?: string
+  /** F9：权重 0-100，影响注入排序（默认 50，越大越优先） */
+  weight?: number
+  /** F9：作用域：'all'（默认）| 'vip'（仅 VIP 注入）| 'group'（仅群聊注入） */
+  scope?: KnowledgeScope
 }
 
 export interface NewKnowledgeItem {
@@ -35,6 +46,9 @@ export interface NewKnowledgeItem {
   content: string
   tags?: string[]
   source?: KnowledgeItemSource
+  category?: string
+  weight?: number
+  scope?: KnowledgeScope
 }
 
 interface KnowledgeFileShape {
@@ -47,6 +61,12 @@ export const KNOWLEDGE_INJECTION_LIMIT = 30
 
 /** 单条知识注入 prompt 时的最大正文长度（避免 prompt 爆炸） */
 export const KNOWLEDGE_ITEM_MAX_CHARS = 600
+
+/** F9：权重默认值（0-100；旧数据未设置时按 50 参与排序） */
+export const KNOWLEDGE_DEFAULT_WEIGHT = 50
+
+/** F9：合法作用域集合（updateItem 校验用） */
+const KNOWLEDGE_SCOPES: readonly KnowledgeScope[] = ['all', 'vip', 'group']
 
 export class KnowledgeStore {
   private items: KnowledgeItem[] | null = null
@@ -66,13 +86,52 @@ export class KnowledgeStore {
     return this.getEnabledItems()
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, limit)
-      .map((item) => ({
-        ...item,
-        content:
-          item.content.length > KNOWLEDGE_ITEM_MAX_CHARS
-            ? `${item.content.slice(0, KNOWLEDGE_ITEM_MAX_CHARS)}…`
-            : item.content
-      }))
+      .map((item) => this.truncateItem(item))
+  }
+
+  /**
+   * F9 注入策略（V2）：按上下文过滤 + 按权重排序 + 条数上限（替代全量时间序注入）。
+   * - scope='vip'：仅 ctx.isVip 时注入；scope='group'：仅 ctx.isGroup 时注入；'all'/缺失：总是；
+   * - weight 降序，同权重按最近更新优先；
+   * - 旧数据（无新字段）行为=默认值（weight=50 / scope='all'），不报错；
+   * - V1 方法 getInjectionItems() 保持不变（f9 关时使用），本方法仅在 f9 开时被调用。
+   */
+  getInjectionItemsV2(
+    ctx: { isVip?: boolean; isGroup?: boolean } = {},
+    limit = KNOWLEDGE_INJECTION_LIMIT
+  ): KnowledgeItem[] {
+    return this.getEnabledItems()
+      .filter((item) => {
+        if (item.scope === 'vip') return ctx.isVip === true
+        if (item.scope === 'group') return ctx.isGroup === true
+        return true // 'all' 或旧数据未设置 scope
+      })
+      .sort(
+        (a, b) =>
+          (b.weight ?? KNOWLEDGE_DEFAULT_WEIGHT) - (a.weight ?? KNOWLEDGE_DEFAULT_WEIGHT) ||
+          b.updatedAt - a.updatedAt
+      )
+      .slice(0, limit)
+      .map((item) => this.truncateItem(item))
+  }
+
+  /**
+   * F9 便捷方法（F3 VIP 专属服务用）：VIP 客户视角的注入条目（scope=all 或 vip）。
+   * 未实现/未启用 F9 时调用方回退全量注入，本方法存在即保证 F3 与 F9 解耦。
+   */
+  getVipInjectionItems(limit = KNOWLEDGE_INJECTION_LIMIT): KnowledgeItem[] {
+    return this.getInjectionItemsV2({ isVip: true }, limit)
+  }
+
+  /** 截断正文到注入上限（V1/V2 共用同一规则） */
+  private truncateItem(item: KnowledgeItem): KnowledgeItem {
+    return {
+      ...item,
+      content:
+        item.content.length > KNOWLEDGE_ITEM_MAX_CHARS
+          ? `${item.content.slice(0, KNOWLEDGE_ITEM_MAX_CHARS)}…`
+          : item.content
+    }
   }
 
   addItem(input: NewKnowledgeItem): KnowledgeItem {
@@ -90,7 +149,11 @@ export class KnowledgeStore {
       source: input.source === 'import' ? 'import' : 'manual',
       enabled: true,
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      // ── F9 可选字段（缺失即默认值，旧格式导入兼容）──
+      ...(input.category?.trim() ? { category: input.category.trim() } : {}),
+      ...(typeof input.weight === 'number' ? { weight: clampWeight(input.weight) } : {}),
+      ...(input.scope && KNOWLEDGE_SCOPES.includes(input.scope) ? { scope: input.scope } : {})
     }
     this.load().push(item)
     this.flush()
@@ -99,7 +162,12 @@ export class KnowledgeStore {
 
   updateItem(
     itemId: string,
-    patch: Partial<Pick<KnowledgeItem, 'title' | 'content' | 'tags' | 'enabled'>>
+    patch: Partial<
+      Pick<
+        KnowledgeItem,
+        'title' | 'content' | 'tags' | 'enabled' | 'category' | 'weight' | 'scope'
+      >
+    >
   ): boolean {
     const item = this.load().find((entry) => entry.itemId === itemId)
     if (!item) return false
@@ -117,6 +185,20 @@ export class KnowledgeStore {
       item.tags = patch.tags.map((tag) => tag.trim()).filter(Boolean)
     }
     if (patch.enabled !== undefined) item.enabled = patch.enabled
+    // ── F9 可选字段（非法值忽略，保持原值）──
+    if (patch.category !== undefined) {
+      item.category = patch.category.trim() || undefined
+    }
+    if (patch.weight !== undefined) {
+      if (typeof patch.weight === 'number' && Number.isFinite(patch.weight)) {
+        item.weight = clampWeight(patch.weight)
+      }
+    }
+    if (patch.scope !== undefined) {
+      if (patch.scope === 'all' || patch.scope === 'vip' || patch.scope === 'group') {
+        item.scope = patch.scope
+      }
+    }
     item.updatedAt = Date.now()
     this.flush()
     return true
@@ -199,4 +281,9 @@ export class KnowledgeStore {
       console.error('[KnowledgeStore] 知识库写入失败:', error)
     }
   }
+}
+
+/** F9：权重裁剪到 [0, 100]，防御越界输入 */
+function clampWeight(value: number): number {
+  return Math.min(100, Math.max(0, Math.round(value)))
 }

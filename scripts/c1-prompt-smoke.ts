@@ -154,8 +154,8 @@ function sectionNames(prompt: string): string[] {
 {
   const p = assembleSystemPrompt({ flags: flagsOf({ 'f1.group_chat': true }) })
   check('f1开无文本: 无空段残留', !p.includes('\n\n\n'))
-  // base 内部有 3 个 ## 标题（任务/回复原则/防自我循环）+ 情绪价值 + 输出格式 = 5
-  check('f1开无文本: 仅 base+emotion+output 三段', sectionNames(p).length === 5, JSON.stringify(sectionNames(p)))
+  // base 内部 3 个 ## 标题（任务/回复原则/防自我循环）+ 情绪价值(含 表达对照) + 输出格式 = 6
+  check('f1开无文本: 仅 base+emotion+output 三段', sectionNames(p).length === 6, JSON.stringify(sectionNames(p)))
 }
 
 console.log(failures === 0 ? '\n全部通过 ✔' : `\n${failures} 项失败 ✘`)

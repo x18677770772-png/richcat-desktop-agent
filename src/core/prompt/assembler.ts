@@ -17,13 +17,15 @@
 import { FeatureFlags } from '../features/flags'
 import { BASE_SYSTEM_PROMPT, LEGACY_SYSTEM_PROMPT } from './base'
 import { EMOTION_VALUE_SECTION } from './emotion-value'
+import { VIP_SERVICE_SECTION } from './sections/vip'
 import { buildOutputFormatSection } from './sections/output-format'
 
 export interface AssembleOptions {
   /** 角色文本（persona.systemPrompt，若有；作为「角色段」原样插入基础模板之上，
    *  内置角色数据不动——设计决策，见 docs §3-F10） */
   personaPrompt?: string | null
-  /** 知识库注入段（已格式化 markdown；F9 开时由 V2 提供） */
+  /** 知识库注入段（已格式化 markdown；F9 开时由 knowledge-v2 提供 V2 紧凑段，
+   *  f9 关时由调用方按 V1 全量格式提供；两者都从本槽位进入，数据驱动） */
   knowledgeSection?: string
   /** 客户长期记忆注入段（已格式化 markdown） */
   customerSection?: string
@@ -31,10 +33,10 @@ export interface AssembleOptions {
   memorySection?: string
   /** 对方发来的图片内容描述（已由设备点开大图读取） */
   imageContext?: string
-  /** 功能注入段（C1 骨架期预留槽位：各功能落地时由 features/<功能>/section.ts 提供文本；
-   *  槽位未填充或 flag 未开时整段不出现） */
+  /** 功能注入段（各功能落地时由 features/<功能>/section.ts 提供文本；
+   *  槽位未填充或 flag 未开时整段不出现；vip 槽位未填充时默认用内置 VIP_SERVICE_SECTION） */
   groupChatSection?: string // F1 群聊规范段
-  vipSection?: string // F3 VIP 服务规范段
+  vipSection?: string // F3 VIP 服务规范段（缺省用 prompt/sections/vip.ts 的权威文本）
   routingSection?: string // F4 多角色路由段
   handoffSection?: string // F2 转人工规则段
   emotionSection?: string // F5 情绪识别段
@@ -70,8 +72,8 @@ export function assembleSystemPrompt(opts: AssembleOptions): string {
     flags.isEnabled('f1.group_chat') && opts.groupChatSection?.trim()
       ? opts.groupChatSection.trim()
       : null,
-    flags.isEnabled('f3.vip_service') && opts.isVip && opts.vipSection?.trim()
-      ? opts.vipSection.trim()
+    flags.isEnabled('f3.vip_service') && opts.isVip
+      ? (opts.vipSection?.trim() || VIP_SERVICE_SECTION)
       : null,
     flags.isEnabled('f4.role_routing') && opts.multiRole && opts.routingSection?.trim()
       ? opts.routingSection.trim()
