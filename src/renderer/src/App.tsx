@@ -836,6 +836,8 @@ function SettingsPanel() {
   const [visionBaseUrl, setVisionBaseUrl] = useState('')
   const [visionModel, setVisionModel] = useState('')
   const [testing, setTesting] = useState(false)
+  // F8 多开：当前实例 profile 信息（app:getProfile）
+  const [profile, setProfile] = useState<{ profile: string; isMultiInstance: boolean } | null>(null)
 
   useEffect(() => {
     const load = async () => {
@@ -845,6 +847,10 @@ function SettingsPanel() {
         setVisionBaseUrl(settings.vision?.baseURL || '')
         setVisionModel(settings.vision?.model || '')
       }
+      const profileInfo = (await window.electron?.invoke('app:getProfile')) as
+        | { profile: string; isMultiInstance: boolean }
+        | undefined
+      if (profileInfo) setProfile(profileInfo)
     }
 
     void load()
@@ -894,6 +900,25 @@ function SettingsPanel() {
         <div>
           <h1>基础配置</h1>
           <p>维护桌面端运行所需的基础参数。</p>
+        </div>
+      </div>
+
+      {/* F8 多开：当前实例标识（--profile） */}
+      <div className="card base-settings-card">
+        <div className="card-title">多开（Profile）</div>
+        <div className="form-group">
+          <div className="profile-info-row">
+            <span className="profile-info-label">当前实例</span>
+            <span className="profile-info-value">
+              {profile?.isMultiInstance
+                ? `profile · ${profile.profile}`
+                : '默认实例（未多开）'}
+            </span>
+          </div>
+          <div className="form-hint">
+            使用 --profile=&lt;name&gt; 启动可同时运行多个独立实例；不同 profile 的数据
+            （设置 / 客户 / 知识库 / 日报）互不干扰，Skill 端口自动错开。详见 docs/multi-instance.md。
+          </div>
         </div>
       </div>
 

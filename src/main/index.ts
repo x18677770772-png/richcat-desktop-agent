@@ -818,6 +818,11 @@ app.whenReady().then(async () => {
     return { success: true }
   })
 
+  // ── F8 多实例：返回当前实例的 profile 信息（设置页展示用） ──
+  ipcMain.handle('app:getProfile', async () => {
+    return { profile: PROFILE, isMultiInstance: PROFILE.length > 0 }
+  })
+
   // ── 工作记忆：轨迹查询 / 回放 ──
   ipcMain.handle('memory:open', async () => {
     createMemoryWindow()

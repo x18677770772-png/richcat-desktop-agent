@@ -143,6 +143,27 @@
   user-select: none;
 }
 
+/* ── F8 多开：基础配置页当前实例标识 ── */
+.profile-info-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.profile-info-label {
+  flex: none;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.profile-info-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 /* ── 开关（Switch） ── */
 .feature-switch {
   position: relative;
