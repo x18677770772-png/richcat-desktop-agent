@@ -29,6 +29,11 @@ export interface Persona {
   enabled: boolean
   createdAt: number
   updatedAt: number
+  // ── V2 扩展（F4 多角色路由：可选字段，旧数据/旧自定义角色兼容，缺失=默认值）──
+  /** F4：该角色负责的问题域关键词（用于路由提示段说明；缺失时不参与路由说明） */
+  routingDomains?: string[]
+  /** F4：是否参与路由（默认 true）；false 的角色不会被路由选中 */
+  routable?: boolean
 }
 
 export interface NewPersona {
@@ -70,7 +75,8 @@ ${BASE_REPLY_RULES}
     source: 'builtin',
     enabled: true,
     createdAt: 0,
-    updatedAt: 0
+    updatedAt: 0,
+    routingDomains: ['健康咨询', '用药疑问', '就医指引', '体检报告', '症状咨询']
   },
   {
     personaId: 'builtin-butler',
@@ -89,7 +95,8 @@ ${BASE_REPLY_RULES}
     source: 'builtin',
     enabled: true,
     createdAt: 0,
-    updatedAt: 0
+    updatedAt: 0,
+    routingDomains: ['日程安排', '生活事务', '出行安排', '采购建议', '信息查询']
   },
   {
     personaId: 'builtin-sports',
@@ -108,7 +115,8 @@ ${BASE_REPLY_RULES}
     source: 'builtin',
     enabled: true,
     createdAt: 0,
-    updatedAt: 0
+    updatedAt: 0,
+    routingDomains: ['健身训练', '跑步', '运动康复', '运动营养', '训练计划']
   },
   {
     personaId: 'builtin-psychologist',
@@ -127,7 +135,8 @@ ${BASE_REPLY_RULES}
     source: 'builtin',
     enabled: true,
     createdAt: 0,
-    updatedAt: 0
+    updatedAt: 0,
+    routingDomains: ['情绪疏导', '压力管理', '人际关系困扰', '心理支持']
   },
   {
     personaId: 'builtin-sales',
@@ -146,7 +155,8 @@ ${BASE_REPLY_RULES}
     source: 'builtin',
     enabled: true,
     createdAt: 0,
-    updatedAt: 0
+    updatedAt: 0,
+    routingDomains: ['产品咨询', '报价', '活动优惠', '下单', '售后指引']
   }
 ]
 
