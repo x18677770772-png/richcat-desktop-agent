@@ -40,6 +40,38 @@ export function buildKnowledgeSection(
 const DEFAULT_MODEL = 'doubao-seed-2-0-lite-260215'
 const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
 
+// ── V2 扩展：SmartReplyResult 公共类型（C2：只加类型与解析，不消费）──
+// 全部字段可选；旧模型/旧 provider 不输出扩展字段时值为 undefined，行为与 V1 一致。
+// 回滚说明：本块属于 C2 独立 commit；后续功能（F1/F2/F4/F5/F7）只读这些字段。
+export interface SmartReplyResult {
+  contact: string | null
+  reply: string | null
+  summary?: string
+  // ── V2 扩展字段（可选；缺失/解析失败一律 undefined）──
+  /** F1：本条消息的归属判定 */
+  messageKind?: 'customer' | 'group_member' | 'role_message' | 'system'
+  /** F5：情绪与风险 */
+  emotion?: {
+    sentiment: 'positive' | 'neutral' | 'negative' | 'angry'
+    risk?: 'refund_intent' | 'complaint' | 'urgent' | 'none'
+    confidence: number // 0-1
+  }
+  /** F2：人工接管信号 */
+  handoff?: {
+    reason:
+      | 'explicit_human' // 客户明确要求转人工
+      | 'complaint' // 投诉
+      | 'price_sensitive' // 价格敏感/砍价纠缠
+      | 'multiple_unresolved' // 多轮未解决（由 sessionMeta 计数，非模型输出）
+      | 'risk_escalation' // 由 F5 高风险升级
+    confidence: number
+  }
+  /** F4：路由目标角色 */
+  routeTo?: { personaId: string; reason: string; confidence: number }
+  /** F7：待跟进承诺 */
+  followUp?: { action: string; dueAt?: string /* ISO 时间，缺省按 now+1d */ }
+}
+
 const REPLY_SYSTEM_PROMPT = `你是一个微信自动回复助手。你会收到一张微信/企业微信的聊天窗口截图。
 
 ## 你的任务
@@ -87,7 +119,7 @@ export class AIClient {
       /** 对方发来的图片内容（设备已点开大图读取的描述） */
       imageContext?: string
     }
-  ): Promise<{ contact: string | null; reply: string | null; summary?: string }> {
+  ): Promise<SmartReplyResult> {
     const startTime = Date.now()
     const basePrompt = ctx?.systemPrompt?.trim() || this.config.systemPrompt || REPLY_SYSTEM_PROMPT
 
@@ -344,9 +376,11 @@ export function buildApiErrorMessage(
 /**
  * 解析 getSmartReply 的 JSON 输出。
  * 容错处理：去掉 markdown 代码围栏、提取第一个 {...} 块。
- */export function parseSmartReply(
-  raw: string
-): { contact: string | null; reply: string | null; summary?: string } | null {
+ * V2 扩展：对 messageKind/emotion/handoff/routeTo/followUp 做字段级独立解析，
+ * 字段缺失/类型不符/解析失败仅该字段为 undefined，绝不让整个 JSON 解析失败
+ * （旧模型不输出这些字段时行为与 V1 完全一致）。
+ */
+export function parseSmartReply(raw: string): SmartReplyResult | null {
   if (!raw || typeof raw !== 'string') return null
   const text = raw.trim()
   if (text === '[SKIP]') return { contact: null, reply: null }
@@ -364,8 +398,116 @@ export function buildApiErrorMessage(
     const reply = typeof obj.reply === 'string' && obj.reply.trim() ? obj.reply.trim() : null
     const summary =
       typeof obj.summary === 'string' && obj.summary.trim() ? obj.summary.trim() : undefined
-    return { contact, reply, summary }
+
+    // ── V2 扩展字段解析（C2：只加类型与解析，不消费；各字段独立 try/catch）──
+    const rawObj = obj as Record<string, unknown>
+    const messageKind = parseMessageKind(rawObj.messageKind)
+    const emotion = parseEmotion(rawObj.emotion)
+    const handoff = parseHandoff(rawObj.handoff)
+    const routeTo = parseRouteTo(rawObj.routeTo)
+    const followUp = parseFollowUp(rawObj.followUp)
+
+    return { contact, reply, summary, messageKind, emotion, handoff, routeTo, followUp }
   } catch {
     return null
   }
+}
+
+/** F1 messageKind：仅接受合法枚举值，否则 undefined */
+function parseMessageKind(value: unknown): SmartReplyResult['messageKind'] {
+  try {
+    if (
+      value === 'customer' ||
+      value === 'group_member' ||
+      value === 'role_message' ||
+      value === 'system'
+    ) {
+      return value
+    }
+    return undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** F5 emotion：sentiment 必须合法；risk 非法时置 undefined；confidence 缺失给 0 */
+function parseEmotion(value: unknown): SmartReplyResult['emotion'] {
+  try {
+    if (!value || typeof value !== 'object') return undefined
+    const raw = value as Record<string, unknown>
+    const sentiment = raw.sentiment
+    if (
+      sentiment !== 'positive' &&
+      sentiment !== 'neutral' &&
+      sentiment !== 'negative' &&
+      sentiment !== 'angry'
+    ) {
+      return undefined
+    }
+    const risk = raw.risk
+    const parsedRisk =
+      risk === 'refund_intent' || risk === 'complaint' || risk === 'urgent' || risk === 'none'
+        ? risk
+        : undefined
+    const confidence =
+      typeof raw.confidence === 'number' ? clamp01(raw.confidence) : 0
+    return { sentiment, risk: parsedRisk, confidence }
+  } catch {
+    return undefined
+  }
+}
+
+/** F2 handoff：reason 必须合法，否则 undefined */
+function parseHandoff(value: unknown): SmartReplyResult['handoff'] {
+  try {
+    if (!value || typeof value !== 'object') return undefined
+    const raw = value as Record<string, unknown>
+    const reason = raw.reason
+    if (
+      reason !== 'explicit_human' &&
+      reason !== 'complaint' &&
+      reason !== 'price_sensitive' &&
+      reason !== 'multiple_unresolved' &&
+      reason !== 'risk_escalation'
+    ) {
+      return undefined
+    }
+    const confidence = typeof raw.confidence === 'number' ? clamp01(raw.confidence) : 0
+    return { reason, confidence }
+  } catch {
+    return undefined
+  }
+}
+
+/** F4 routeTo：personaId 必须为非空字符串，否则 undefined */
+function parseRouteTo(value: unknown): SmartReplyResult['routeTo'] {
+  try {
+    if (!value || typeof value !== 'object') return undefined
+    const raw = value as Record<string, unknown>
+    if (typeof raw.personaId !== 'string' || !raw.personaId.trim()) return undefined
+    const reason = typeof raw.reason === 'string' ? raw.reason.trim() : ''
+    const confidence = typeof raw.confidence === 'number' ? clamp01(raw.confidence) : 0
+    return { personaId: raw.personaId.trim(), reason, confidence }
+  } catch {
+    return undefined
+  }
+}
+
+/** F7 followUp：action 必须为非空字符串；dueAt 为可选的 ISO 时间字符串 */
+function parseFollowUp(value: unknown): SmartReplyResult['followUp'] {
+  try {
+    if (!value || typeof value !== 'object') return undefined
+    const raw = value as Record<string, unknown>
+    if (typeof raw.action !== 'string' || !raw.action.trim()) return undefined
+    const dueAt =
+      typeof raw.dueAt === 'string' && raw.dueAt.trim() ? raw.dueAt.trim() : undefined
+    return { action: raw.action.trim(), dueAt }
+  } catch {
+    return undefined
+  }
+}
+
+/** 把置信度裁剪到 [0, 1]，防御模型输出越界值 */
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value))
 }
