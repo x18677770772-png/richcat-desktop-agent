@@ -32,6 +32,25 @@ interface FollowUpItem {
   source?: 'ai' | 'manual'
 }
 
+/** F2 接管单的 UI 子集（与 src/core/features/human-handoff/types.ts 对齐） */
+interface HandoffRequest {
+  handoffId: string
+  contact: string | null
+  reason: string
+  confidence: number
+  createdAt: number
+  status: 'open' | 'resolved'
+}
+
+/** F2 接管原因中文标签（与 core 模块 HANDOFF_REASON_LABELS 一致） */
+const HANDOFF_REASON_LABELS: Record<string, string> = {
+  explicit_human: '客户要求转人工',
+  complaint: '投诉',
+  price_sensitive: '价格敏感/砍价',
+  multiple_unresolved: '多轮未解决',
+  risk_escalation: '高风险情绪升级'
+}
+
 /** 默认值与 src/core/features/flags.ts 的 FEATURE_FLAG_DEFAULTS 保持一致 */
 const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
   'f1.group_chat': false,
@@ -126,6 +145,9 @@ export default function FeaturePanel(): React.JSX.Element {
   const [followUps, setFollowUps] = useState<FollowUpItem[] | null>(null)
   const [newFollowUpAction, setNewFollowUpAction] = useState('')
   const [followUpBusy, setFollowUpBusy] = useState(false)
+  // F2 待接管列表（handoff:list；open 项 + 标记已处理）
+  const [handoffs, setHandoffs] = useState<HandoffRequest[] | null>(null)
+  const [handoffBusy, setHandoffBusy] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -156,6 +178,14 @@ export default function FeaturePanel(): React.JSX.Element {
       })
       .catch((error: unknown) => {
         console.error('[FeaturePanel] followup:list 失败:', error)
+      })
+    window.electron
+      ?.invoke('handoff:list')
+      .then((result) => {
+        if (!cancelled && Array.isArray(result)) setHandoffs(result as HandoffRequest[])
+      })
+      .catch((error: unknown) => {
+        console.error('[FeaturePanel] handoff:list 失败:', error)
       })
     return () => {
       cancelled = true
@@ -293,6 +323,38 @@ export default function FeaturePanel(): React.JSX.Element {
     }
   }, [newFollowUpAction, reloadFollowUps])
 
+  /** 刷新待接管列表（handoff:list） */
+  const reloadHandoffs = useCallback(async () => {
+    try {
+      const result = (await window.electron?.invoke('handoff:list')) as HandoffRequest[] | undefined
+      if (Array.isArray(result)) setHandoffs(result)
+    } catch (error: unknown) {
+      console.error('[FeaturePanel] handoff:list 失败:', error)
+    }
+  }, [])
+
+  /** 标记接管单已处理（handoff:resolve；同时恢复该客户自动回复） */
+  const handleHandoffResolve = useCallback(
+    async (handoffId: string) => {
+      setHandoffBusy(true)
+      try {
+        const result = (await window.electron?.invoke('handoff:resolve', handoffId)) as
+          { success?: boolean; error?: string } | undefined
+        if (result?.success) {
+          await reloadHandoffs()
+        } else {
+          showToast(`处理失败：${result?.error || '未知错误'}`, 'error')
+        }
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error)
+        showToast(`处理失败：${message}`, 'error')
+      } finally {
+        setHandoffBusy(false)
+      }
+    },
+    [reloadHandoffs]
+  )
+
   return (
     <div className="settings-page slide-up">
       <div className="settings-page-header">
@@ -364,6 +426,46 @@ export default function FeaturePanel(): React.JSX.Element {
                           />
                           纯 @ 触发模式（跳过 VLM 群聊检测，零检测成本）
                         </label>
+                      </div>
+                    )}
+                    {meta.key === 'f2.human_handoff' && (
+                      <div className="feature-row-config">
+                        <div className="feature-row-config-label" style={{ marginBottom: 6 }}>
+                          待接管列表（触发后该客户自动回复暂停；处理完成即恢复）
+                        </div>
+                        <div className="followup-list">
+                          {handoffs === null ? (
+                            <div className="feature-panel-loading">加载中…</div>
+                          ) : handoffs.filter((item) => item.status === 'open').length === 0 ? (
+                            <div className="followup-empty">暂无待接管</div>
+                          ) : (
+                            handoffs
+                              .filter((item) => item.status === 'open')
+                              .map((item) => (
+                                <div key={item.handoffId} className="followup-item">
+                                  <div className="followup-item-info">
+                                    <div className="followup-item-action">
+                                      {item.contact ? `【${item.contact}】` : '未知客户'}
+                                      {' · '}
+                                      {HANDOFF_REASON_LABELS[item.reason] ?? item.reason}
+                                    </div>
+                                    <div className="followup-item-meta">
+                                      {formatDue(item.createdAt)} 触发 · 置信度{' '}
+                                      {Math.round(item.confidence * 100)}%
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary followup-done-btn"
+                                    disabled={handoffBusy}
+                                    onClick={() => void handleHandoffResolve(item.handoffId)}
+                                  >
+                                    已处理
+                                  </button>
+                                </div>
+                              ))
+                          )}
+                        </div>
                       </div>
                     )}
                     {meta.key === 'f7.follow_up' && (

@@ -30,11 +30,16 @@ export interface LocalProviderContext {
   /** 回写客户长期记忆（contact 为 null 时不回写） */
   recordCustomerMemory?: (contact: string, summary: string, reply: string | null) => void
   /**
-   * 每轮 getSmartReply 结果的后处理钩子（F1 后置过滤 / 后续 F2/F5/F7 消费入口）。
+   * 每轮 getSmartReply 结果的后处理钩子（F1 后置过滤 / F2/F5/F7 消费入口）。
    * 返回的 result 用于本轮发送判定与记忆回写；抛错被吞掉（记日志，不影响主链路）。
    * flag 关闭时装配方传入的实现应立即原样返回 result（零影响）。
    */
   transformResult?: (result: SmartReplyResult, input: ProviderInput) => SmartReplyResult
+  /**
+   * F2：会话级暂停判定——上一轮识别到的联系人（lastContact）是否已被人工接管。
+   * 返回 true → 本轮直接 skip（不发 AI 调用，零成本）；flag 关时装配方返回 false（零影响）。
+   */
+  shouldSkipContact?: (contact: string) => boolean
 }
 
 export interface LocalProviderConfig {
@@ -62,6 +67,13 @@ export class LocalProvider implements ProviderAdapter {
 
     await this.persistDebugInput(input)
     yield { type: 'thinking', content: this.buildThinkingMessage(input) }
+
+    // F2：上一轮联系人已被人工接管 → 本轮零调用直接跳过（该会话暂停自动回复）
+    if (this.lastContact && this.context.shouldSkipContact?.(this.lastContact)) {
+      console.log(`[LocalProvider] 客户「${this.lastContact}」已转人工，跳过本轮自动回复`)
+      yield { type: 'skip' }
+      return
+    }
 
     try {
       // ── F10（C1）：优先使用 PromptAssembler 拼好的完整 system prompt ──
@@ -112,8 +124,7 @@ export class LocalProvider implements ProviderAdapter {
     } catch (error: unknown) {
       yield {
         type: 'error',
-        error:
-          error instanceof Error ? error.message : String(error) || 'Provider 调用失败'
+        error: error instanceof Error ? error.message : String(error) || 'Provider 调用失败'
       }
     }
   }
@@ -141,10 +152,7 @@ export class LocalProvider implements ProviderAdapter {
   }
 
   /** 调用装配方注入的 transformResult；任何异常吞掉并记日志，返回原 result（不阻塞主链路） */
-  private applyTransformResult(
-    result: SmartReplyResult,
-    input: ProviderInput
-  ): SmartReplyResult {
+  private applyTransformResult(result: SmartReplyResult, input: ProviderInput): SmartReplyResult {
     if (!this.context.transformResult) return result
     try {
       return this.context.transformResult(result, input)

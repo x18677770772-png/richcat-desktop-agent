@@ -60,6 +60,16 @@ import { installDailyReport } from '../core/features/daily-report/install'
 // ── F7 待跟进提醒（阶段 2；装配层在 features/follow-up/install.ts）──
 import { FollowUpStore, handleFollowUpResult } from '../core/features/follow-up'
 import { installFollowUp } from '../core/features/follow-up/install'
+// ── F2 人工接管（阶段 3；装配层在 features/human-handoff/install.ts）──
+import {
+  captureHandoffResult,
+  DEFAULT_MAX_UNRESOLVED_TURNS,
+  HandoffHookContext,
+  HandoffStore
+} from '../core/features/human-handoff'
+import { installHumanHandoff, HumanHandoffServices } from '../core/features/human-handoff/install'
+// ── F5 情绪/风险识别（F2 升级通道接线）──
+import { handleEmotionResult } from '../core/features/emotion-risk'
 const StoreClass = typeof Store === 'function' ? Store : ((Store as any).default as typeof Store)
 
 // ── 多开支持：--profile=<name> 数据隔离 ──
@@ -131,6 +141,8 @@ interface AppSettings {
   featuresConfig?: {
     /** F1 群聊支持：机器人昵称列表 + 纯 @ 触发模式 */
     f1?: { botNames?: string[]; mentionOnly?: boolean }
+    /** F2 人工接管：多轮未解决上限（默认 3） */
+    f2?: { maxUnresolvedTurns?: number }
   }
 }
 
@@ -262,12 +274,66 @@ function getFollowUpStore(): FollowUpStore {
   return followUpStoreInstance
 }
 
+// ── F2 人工接管：存储单例 + 会话级暂停集合 + 装配服务 ──
+let handoffStoreInstance: HandoffStore | null = null
+function getHandoffStore(): HandoffStore {
+  if (!handoffStoreInstance) {
+    handoffStoreInstance = new HandoffStore(
+      join(worktraceBaseDir(), 'handoffs', 'handoffs.json')
+    )
+  }
+  return handoffStoreInstance
+}
+
+/** 已接管客户的暂停集合（contact → 该会话暂停自动回复；resolve 时移除） */
+const handoffPausedContacts = new Set<string>()
+
+/** installHumanHandoff 装配的服务（whenReady 时注入；engine:start 之前已就位） */
+let handoffServices: HumanHandoffServices | null = null
+
+/** F2 钩子上下文（captureHandoffResult / openHandoff 用；f2 关时装配方不调用） */
+function buildHandoffContext(): HandoffHookContext {
+  return {
+    getStore: getHandoffStore,
+    notify: (payload) => handoffServices?.notify(payload),
+    notifyDesktop: (title, body) => handoffServices?.notifyDesktop(title, body),
+    getCustomerStore,
+    pausedContacts: handoffPausedContacts,
+    maxUnresolvedTurns:
+      normalizeSettings(settingsStore.store).featuresConfig?.f2?.maxUnresolvedTurns ??
+      DEFAULT_MAX_UNRESOLVED_TURNS
+  }
+}
+
 /**
  * 组合结果钩子（LocalProvider.transformResult）：
- * 1. F7：模型输出 followUp 承诺 → 生成待办（f7 关时跳过，零影响；失败吞掉不影响发送）；
- * 2. F1：群聊后置过滤（f1 关时原样返回）。
+ * 1. F5：情绪/风险 → 打标 + 通知 + 高风险升级人工接管（f5 关时跳过；失败吞掉）；
+ * 2. F2：模型 handoff 信号 + 多轮未解决计数 → 打开接管单（f2 关时跳过）；
+ * 3. F7：模型 followUp 承诺 → 生成待办（f7 关时跳过）；
+ * 4. F1：群聊后置过滤（f1 关时原样返回）。
  */
 function transformProviderResult(result: SmartReplyResult, input: ProviderInput): SmartReplyResult {
+  if (featureFlags.isEnabled('f5.emotion_risk')) {
+    try {
+      handleEmotionResult({
+        result,
+        stores: { customer: getCustomerStore() },
+        notify: (payload) => handoffServices?.notify(payload),
+        requestHandoff: (reason, confidence) => {
+          handoffServices?.requestHandoff(reason, result.contact ?? null, confidence)
+        }
+      })
+    } catch (error) {
+      console.error('[Main] F5 情绪处理失败（不影响回复发送）:', error)
+    }
+  }
+  if (featureFlags.isEnabled('f2.human_handoff')) {
+    try {
+      captureHandoffResult(result, buildHandoffContext(), featureFlags)
+    } catch (error) {
+      console.error('[Main] F2 接管判断失败（不影响回复发送）:', error)
+    }
+  }
   if (featureFlags.isEnabled('f7.follow_up')) {
     try {
       handleFollowUpResult(result, getFollowUpStore())
@@ -1201,8 +1267,9 @@ app.whenReady().then(async () => {
     worktraceBaseDir,
     listTraceSessions,
     // F7 已落地：日报「今日待跟进」节取数（f7 关时 getFollowUpStore 仍可用，列表为空）
-    listFollowUps: () => getFollowUpStore().list()
-    // listHandoffs: () => getHandoffStore().list({ status: 'open' }),    // F2 落地后接线
+    listFollowUps: () => getFollowUpStore().list(),
+    // F2 已落地：日报「待处理接管」节取数（f2 关时列表为空）
+    listHandoffs: () => getHandoffStore().listOpen()
   })
 
   // ── F7 待跟进装配（IPC followup:* + 到期扫描定时器；f7 关时定时器不注册）──
@@ -1210,6 +1277,18 @@ app.whenReady().then(async () => {
     flags: featureFlags,
     getStore: getFollowUpStore,
     profile: PROFILE
+  })
+
+  // ── F2 人工接管装配（IPC handoff:* + 通知；f2 关时 IPC 拒绝、requestHandoff no-op）──
+  handoffServices = installHumanHandoff({
+    flags: featureFlags,
+    getStore: getHandoffStore,
+    getCustomerStore,
+    pausedContacts: handoffPausedContacts,
+    profile: PROFILE,
+    maxUnresolvedTurns:
+      normalizeSettings(settingsStore.store).featuresConfig?.f2?.maxUnresolvedTurns ??
+      DEFAULT_MAX_UNRESOLVED_TURNS
   })
 
   createWindow()
@@ -1284,8 +1363,10 @@ async function startEngineCore(rawConfig?: any): Promise<SkillStartResult> {
               console.error('[Main] 客户记忆回写失败:', error)
             }
           },
-          // ── F1 群聊后置过滤 + F7 待办捕获（各自 flag 门控，关闭零影响）──
-          transformResult: transformProviderResult
+          // ── F1/F2/F5/F7 结果钩子 + F2 会话暂停（各自 flag 门控，关闭零影响）──
+          transformResult: transformProviderResult,
+          shouldSkipContact: (contact) =>
+            featureFlags.isEnabled('f2.human_handoff') && handoffPausedContacts.has(contact)
         }
       })
     } else {
@@ -1614,6 +1695,19 @@ function normalizeFeaturesConfig(raw: unknown): NonNullable<AppSettings['feature
     out.f1 = {
       botNames,
       mentionOnly: typeof f1.mentionOnly === 'boolean' ? f1.mentionOnly : false
+    }
+  }
+
+  // F2 人工接管：maxUnresolvedTurns 正整数（裁剪 [1, 20]，缺省 3）
+  const f2Raw = rec.f2
+  if (f2Raw && typeof f2Raw === 'object') {
+    const f2 = f2Raw as Record<string, unknown>
+    if (typeof f2.maxUnresolvedTurns === 'number' && Number.isFinite(f2.maxUnresolvedTurns)) {
+      out.f2 = {
+        maxUnresolvedTurns: Math.min(20, Math.max(1, Math.round(f2.maxUnresolvedTurns)))
+      }
+    } else {
+      out.f2 = { maxUnresolvedTurns: DEFAULT_MAX_UNRESOLVED_TURNS }
     }
   }
   return out
