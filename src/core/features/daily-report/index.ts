@@ -15,6 +15,9 @@ import { FeatureFlags } from '../flags'
 import { DailyReportGenerator, DailyReportData } from './report'
 import { dailyReportFilePath, renderDailyReport } from './section'
 
+export { DailyReportGenerator } from './report'
+export { renderDailyReport, dailyReportFilePath } from './section'
+
 export interface DailyReportSchedulerOptions {
   flags: FeatureFlags
   generator: DailyReportGenerator
