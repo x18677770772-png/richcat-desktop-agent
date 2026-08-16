@@ -21,6 +21,17 @@ type FeatureFlagKey =
   | 'f9.knowledge_v2'
   | 'f10.prompt_system'
 
+/** F7 待跟进的 UI 子集（与 src/core/features/follow-up/types.ts 对齐） */
+interface FollowUpItem {
+  followUpId: string
+  contact: string | null
+  action: string
+  dueAt: number
+  status: 'open' | 'done' | 'cancelled'
+  createdAt: number
+  source?: 'ai' | 'manual'
+}
+
 /** 默认值与 src/core/features/flags.ts 的 FEATURE_FLAG_DEFAULTS 保持一致 */
 const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
   'f1.group_chat': false,
@@ -97,6 +108,13 @@ const FEATURE_META: FeatureMeta[] = [
   }
 ]
 
+/** 待办到期时间显示（MM-DD HH:mm；已过期加前缀） */
+function formatDue(ts: number): string {
+  const d = new Date(ts)
+  const time = `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  return `${ts < Date.now() ? '已到期 ' : ''}${time}`
+}
+
 export default function FeaturePanel(): React.JSX.Element {
   const [flags, setFlags] = useState<Record<FeatureFlagKey, boolean> | null>(null)
   const [saving, setSaving] = useState<FeatureFlagKey | null>(null)
@@ -104,6 +122,10 @@ export default function FeaturePanel(): React.JSX.Element {
   const [f1BotNames, setF1BotNames] = useState('')
   const [f1MentionOnly, setF1MentionOnly] = useState(false)
   const [f1Saving, setF1Saving] = useState(false)
+  // F7 待跟进列表（followup:list；open 项 + 标记完成 + 手动添加）
+  const [followUps, setFollowUps] = useState<FollowUpItem[] | null>(null)
+  const [newFollowUpAction, setNewFollowUpAction] = useState('')
+  const [followUpBusy, setFollowUpBusy] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -126,6 +148,14 @@ export default function FeaturePanel(): React.JSX.Element {
       })
       .catch((error: unknown) => {
         console.error('[FeaturePanel] settings:getAll 失败:', error)
+      })
+    window.electron
+      ?.invoke('followup:list')
+      .then((result) => {
+        if (!cancelled && Array.isArray(result)) setFollowUps(result as FollowUpItem[])
+      })
+      .catch((error: unknown) => {
+        console.error('[FeaturePanel] followup:list 失败:', error)
       })
     return () => {
       cancelled = true
@@ -181,31 +211,87 @@ export default function FeaturePanel(): React.JSX.Element {
   }, [flags])
 
   /** 保存 F1 群聊参数（botNames 逗号分隔 + mentionOnly）；失败提示不阻塞 */
-  const saveF1Config = useCallback(
-    async (botNames: string, mentionOnly: boolean) => {
-      setF1Saving(true)
+  const saveF1Config = useCallback(async (botNames: string, mentionOnly: boolean) => {
+    setF1Saving(true)
+    try {
+      const parsed = botNames
+        .split(/[,，、\s]+/)
+        .map((name) => name.trim())
+        .filter((name) => name.length > 0)
+      const result = (await window.electron?.invoke('settings:set', {
+        featuresConfig: { f1: { botNames: parsed, mentionOnly } }
+      })) as { success?: boolean } | undefined
+      if (result?.success) {
+        showToast('群聊参数已保存', 'success')
+      } else {
+        showToast('群聊参数保存失败', 'error')
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      showToast(`群聊参数保存失败：${message}`, 'error')
+    } finally {
+      setF1Saving(false)
+    }
+  }, [])
+
+  /** 刷新待跟进列表（followup:list） */
+  const reloadFollowUps = useCallback(async () => {
+    try {
+      const result = (await window.electron?.invoke('followup:list')) as FollowUpItem[] | undefined
+      if (Array.isArray(result)) setFollowUps(result)
+    } catch (error: unknown) {
+      console.error('[FeaturePanel] followup:list 失败:', error)
+    }
+  }, [])
+
+  /** 标记待办完成（followup:setStatus done） */
+  const handleFollowUpDone = useCallback(
+    async (followUpId: string) => {
+      setFollowUpBusy(true)
       try {
-        const parsed = botNames
-          .split(/[,，、\s]+/)
-          .map((name) => name.trim())
-          .filter((name) => name.length > 0)
-        const result = (await window.electron?.invoke('settings:set', {
-          featuresConfig: { f1: { botNames: parsed, mentionOnly } }
-        })) as { success?: boolean } | undefined
+        const result = (await window.electron?.invoke('followup:setStatus', followUpId, 'done')) as
+          { success?: boolean; error?: string } | undefined
         if (result?.success) {
-          showToast('群聊参数已保存', 'success')
+          await reloadFollowUps()
         } else {
-          showToast('群聊参数保存失败', 'error')
+          showToast(`标记失败：${result?.error || '未知错误'}`, 'error')
         }
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error)
-        showToast(`群聊参数保存失败：${message}`, 'error')
+        showToast(`标记失败：${message}`, 'error')
       } finally {
-        setF1Saving(false)
+        setFollowUpBusy(false)
       }
     },
-    []
+    [reloadFollowUps]
   )
+
+  /** 手动添加待办（followup:add，source=manual） */
+  const handleFollowUpAdd = useCallback(async () => {
+    const action = newFollowUpAction.trim()
+    if (!action) return
+    setFollowUpBusy(true)
+    try {
+      const result = (await window.electron?.invoke('followup:add', {
+        action,
+        contact: null
+      })) as { success?: boolean; error?: string } | undefined
+      if (result?.success) {
+        setNewFollowUpAction('')
+        await reloadFollowUps()
+      } else {
+        showToast(
+          `添加失败：${result?.error === 'duplicate' ? '已存在相同待办' : result?.error || '未知错误'}`,
+          'error'
+        )
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      showToast(`添加失败：${message}`, 'error')
+    } finally {
+      setFollowUpBusy(false)
+    }
+  }, [newFollowUpAction, reloadFollowUps])
 
   return (
     <div className="settings-page slide-up">
@@ -278,6 +364,66 @@ export default function FeaturePanel(): React.JSX.Element {
                           />
                           纯 @ 触发模式（跳过 VLM 群聊检测，零检测成本）
                         </label>
+                      </div>
+                    )}
+                    {meta.key === 'f7.follow_up' && (
+                      <div className="feature-row-config">
+                        <div className="feature-row-config-label" style={{ marginBottom: 6 }}>
+                          待跟进列表（到期自动桌面提醒；标记完成即停止提醒）
+                        </div>
+                        <div className="followup-list">
+                          {followUps === null ? (
+                            <div className="feature-panel-loading">加载中…</div>
+                          ) : followUps.filter((item) => item.status === 'open').length === 0 ? (
+                            <div className="followup-empty">暂无待跟进</div>
+                          ) : (
+                            followUps
+                              .filter((item) => item.status === 'open')
+                              .map((item) => (
+                                <div key={item.followUpId} className="followup-item">
+                                  <div className="followup-item-info">
+                                    <div className="followup-item-action">
+                                      {item.contact ? `【${item.contact}】` : ''}
+                                      {item.action}
+                                    </div>
+                                    <div className="followup-item-meta">
+                                      到期 {formatDue(item.dueAt)} ·{' '}
+                                      {item.source === 'manual' ? '手动' : 'AI 承诺'}
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary followup-done-btn"
+                                    disabled={followUpBusy}
+                                    onClick={() => void handleFollowUpDone(item.followUpId)}
+                                  >
+                                    完成
+                                  </button>
+                                </div>
+                              ))
+                          )}
+                        </div>
+                        <div className="followup-add-line">
+                          <input
+                            className="form-input feature-row-config-input"
+                            type="text"
+                            value={newFollowUpAction}
+                            disabled={followUpBusy}
+                            onChange={(e) => setNewFollowUpAction(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') void handleFollowUpAdd()
+                            }}
+                            placeholder="手动添加待办，如：明天上午回复退款进度"
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            disabled={followUpBusy || !newFollowUpAction.trim()}
+                            onClick={() => void handleFollowUpAdd()}
+                          >
+                            添加
+                          </button>
+                        </div>
                       </div>
                     )}
                     <div className="feature-row-meta">

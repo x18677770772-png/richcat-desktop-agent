@@ -57,6 +57,9 @@ import {
 import { createGroupChatFeature, GroupChatDetector } from '../core/features/group-chat'
 // ── F6 服务日报（阶段 2；装配层在 features/daily-report/install.ts，本文件仅两行接线）──
 import { installDailyReport } from '../core/features/daily-report/install'
+// ── F7 待跟进提醒（阶段 2；装配层在 features/follow-up/install.ts）──
+import { FollowUpStore, handleFollowUpResult } from '../core/features/follow-up'
+import { installFollowUp } from '../core/features/follow-up/install'
 const StoreClass = typeof Store === 'function' ? Store : ((Store as any).default as typeof Store)
 
 // ── 多开支持：--profile=<name> 数据隔离 ──
@@ -246,6 +249,33 @@ function filterF1GroupChatResult(result: SmartReplyResult, input: ProviderInput)
   const groupChat = input.groupChat
   if (!featureFlags.isEnabled('f1.group_chat') || !groupChat?.isGroup) return result
   return createGroupChatFeature().filterResult(result, groupChat)
+}
+
+// ── F7 待跟进存储单例（懒创建）──
+let followUpStoreInstance: FollowUpStore | null = null
+function getFollowUpStore(): FollowUpStore {
+  if (!followUpStoreInstance) {
+    followUpStoreInstance = new FollowUpStore(
+      join(worktraceBaseDir(), 'followups', 'followups.json')
+    )
+  }
+  return followUpStoreInstance
+}
+
+/**
+ * 组合结果钩子（LocalProvider.transformResult）：
+ * 1. F7：模型输出 followUp 承诺 → 生成待办（f7 关时跳过，零影响；失败吞掉不影响发送）；
+ * 2. F1：群聊后置过滤（f1 关时原样返回）。
+ */
+function transformProviderResult(result: SmartReplyResult, input: ProviderInput): SmartReplyResult {
+  if (featureFlags.isEnabled('f7.follow_up')) {
+    try {
+      handleFollowUpResult(result, getFollowUpStore())
+    } catch (error) {
+      console.error('[Main] F7 待办生成失败（不影响回复发送）:', error)
+    }
+  }
+  return filterF1GroupChatResult(result, input)
 }
 
 let runtime: RuntimeHost<ReturnType<typeof createInitialGenericChannelState>> | null = null
@@ -1169,9 +1199,17 @@ app.whenReady().then(async () => {
     flags: featureFlags,
     getCustomerStore,
     worktraceBaseDir,
-    listTraceSessions
-    // listFollowUps: () => getFollowUpStore().list({ status: 'open' }),  // F7 落地后接线
+    listTraceSessions,
+    // F7 已落地：日报「今日待跟进」节取数（f7 关时 getFollowUpStore 仍可用，列表为空）
+    listFollowUps: () => getFollowUpStore().list()
     // listHandoffs: () => getHandoffStore().list({ status: 'open' }),    // F2 落地后接线
+  })
+
+  // ── F7 待跟进装配（IPC followup:* + 到期扫描定时器；f7 关时定时器不注册）──
+  installFollowUp({
+    flags: featureFlags,
+    getStore: getFollowUpStore,
+    profile: PROFILE
   })
 
   createWindow()
@@ -1246,8 +1284,8 @@ async function startEngineCore(rawConfig?: any): Promise<SkillStartResult> {
               console.error('[Main] 客户记忆回写失败:', error)
             }
           },
-          // ── F1 群聊后置过滤（f1 关 → 原样返回，零影响）──
-          transformResult: filterF1GroupChatResult
+          // ── F1 群聊后置过滤 + F7 待办捕获（各自 flag 门控，关闭零影响）──
+          transformResult: transformProviderResult
         }
       })
     } else {
