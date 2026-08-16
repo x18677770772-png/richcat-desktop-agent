@@ -1,10 +1,8 @@
-﻿<a name="readme-top"></a>
-
 <div align="center">
 
-<h1>财听猫 · The Open-Source Working Memory Engine</h1>
+# 财听猫 RichCat 🐱💰
 
-<p><strong>Bring AI into the real software world — read the screen, get the job done, and accumulate on-the-job experience.</strong></p>
+**AI WeChat Customer-Service System — Let AI serve your customers on WeChat, 24/7, just like a human agent**
 
 <p>
   <a href="./README.md"><b>English</b></a>
@@ -13,226 +11,83 @@
 </p>
 
 <p>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache 2.0" /></a>
-  <a href="https://github.com/x18677770772-png/richcat-desktop-agent/stargazers"><img src="https://img.shields.io/github/stars/x18677770772-png/richcat-desktop-agent?logo=github&label=Stars" alt="GitHub Stars" /></a>
-  <a href="https://github.com/x18677770772-png/richcat-desktop-agent/network/members"><img src="https://img.shields.io/github/forks/x18677770772-png/richcat-desktop-agent?logo=github&label=Forks" alt="GitHub Forks" /></a>
+  <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache 2.0" />
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-success" alt="Platform: Windows | macOS" />
-  <a href="https://discord.com/invite/8H6KpbXq3t"><img src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white" alt="Join Discord" /></a>
-  <a href="https://github.com/x18677770772-png/richcat-desktop-agent"><img src="https://img.shields.io/badge/GitHub-RichCat-181717" alt="Website" /></a>
-</p>
-
-<p>
-  <a href="#-getting-started"><b>Get Started</b></a> ·
-  <a href="#-how-it-works--see--think--do--learn"><b>How It Works</b></a> ·
-  <a href="#-configuration"><b>Configuration</b></a> ·
-  <a href="https://github.com/x18677770772-png/richcat-desktop-agent"><b>Website</b></a>
+  <img src="https://img.shields.io/badge/Stack-Electron%20%7C%20React%20%7C%20VLM-5865F2" alt="Stack" />
 </p>
 
 </div>
 
 ---
 
-## Overview
+## What is this?
 
-> **财听猫 does not replace the LLM. It completes the one layer the LLM cannot reach** — turning screen pixels into structured semantics, and task intent into real operations.
+**RichCat (财听猫)** is my personal AI WeChat customer-service system. Built on Electron + Vision-Language Model (VLM), it "sees" the WeChat chat window like a human — detecting new messages, understanding customer intent, replying automatically, and keeping customer records. It watches over your WeChat business around the clock and frees you from repetitive customer-service work.
 
-<div align="center">
-  <video src="https://github.com/user-attachments/assets/fdceada5-940b-45d1-bf96-2d26df651809" width="100%" controls></video>
-</div>
-
-An enterprise's heaviest work does not live inside an LLM API. It lives **on the screen, inside human workflows**:
-
-- **Many surfaces** — a single task spans multiple applications and windows.
-- **Long horizons** — read → judge → act → follow up → recover. It is never one button click.
-- **Tacit experience** — the real know-how lives in every judgment a senior operator makes, not in any document.
-
-Large language models solved *thinking* and *speaking*. They have **not** yet solved *learning the job* and *doing it well*. 财听猫 is the desktop runtime that closes that gap — an agent that **sees** any interface, **thinks** in context, **acts** like a human operator, and **learns** from every execution.
+> No WeChat API or protocol required: it is pure vision-based automation, exactly like a real person operating the computer.
 
 ---
 
-## ✦ How It Works — See · Think · Do · Learn
+## ✨ Core Features
 
-```mermaid
-flowchart LR
-    SEE["👁 See<br/>Understand any GUI &amp; state"] --> THINK["🧠 Think<br/>Plan with context"]
-    THINK --> DO["✋ Do<br/>Click · Type · Switch · Send"]
-    DO --> LEARN["📚 Learn<br/>Write a structured work-trace"]
-    LEARN -. compounds into memory .-> THINK
-```
-
-| Stage | What happens |
-| :-- | :-- |
-| **See** | A vision model understands any software UI and its current state. |
-| **Think** | The agent plans using context and history to decide *what to do*. |
-| **Do** | It clicks, types, switches windows, sends, and records — exactly like a human operator. |
-| **Learn** | Every execution is written as a structured **work-trace**, building durable working memory. |
-
-> This is not an app. It is a **working memory engine** that puts AI on the job.
-
----
-
-## ✦ The Work Memory Runtime
-
-Every execution becomes **one structured `work-trace`**:
-
-```text
-work-trace = {
-  timestamp,    # when it happened
-  ui_state,     # what the screen looked like
-  rationale,    # WHY this decision was made
-  action,       # click / type / switch / send
-  result        # what happened next
-}
-```
-
-Continuously written and replayable step by step, the runtime offers **three capabilities ordinary RPA cannot**:
-
-| Capability | Why it matters |
-| :-- | :-- |
-| 🔁 **Replay** | When something breaks, review every step — down to the decision behind it. |
-| 📊 **Eval** | Swap models or versions and compare outcomes consistently. |
-| 🧬 **Inherit** | The judgment behind a task is captured once and reused, instead of living only in someone's head. |
-
-> Others record **the steps**. 财听猫 records **why each step was taken**. That is the leap from **RPA** to a true **Agent Runtime**.
-
-Built for real-world, sensitive environments:
-
-- 🔒 **Local-first execution** — work traces stay on the machine by default; data never has to leave.
-- 🧾 **Fully auditable** — every action trace can be inspected end to end.
-- 🔄 **Model-agnostic** — adapts to vision LLMs and is switchable across providers.
-
----
-
-## ✦ Core Capabilities
-
-From WeChat and WeCom to **any desktop software**, 财听猫 lets AI work where there is **no API**.
-
-- **Universal Vision-Based RPA** — No fragile webhooks or private protocols. 财听猫 behaves like a human user: reading chat bubbles, manipulating inputs, and navigating native UIs through abstract visual recognition.
-- **State-of-the-Art Vision** — A unified vision layer extracts unread notification dots, message lists, and chat-bubble text in real time across complex, dynamic layouts.
-- **Agentic Workspaces** — Turn unstructured chat requests into actionable node-workflows and API calls, fully programmable via local AI.
-- **AI Customer-Service Workbench** — Turn 财听猫 into a full AI customer-service agent with four built-in capabilities:
-  - 🎭 **Personas** — switch between ready-made roles (medical expert, butler, sports coach, psychologist, sales consultant) or define your own; the persona drives the reply's system prompt.
-  - 📚 **Knowledge Base** — maintain Q&A entries (single or batch import); enabled entries are injected into every reply so answers follow your business facts.
-  - 🧠 **Per-Customer Long-Term Memory** — each contact gets an auto-created profile; every conversation is summarized and remembered, and the history is injected back into the next reply.
-  - 🏷 **Customer Tags & Categories** — tag, categorize, and annotate customers (VIP / prospect / agent …) with stats and tag filters, all stored locally.
-  - 🧩 **Multi-Provider Chat Models** — the built-in chat provider accepts any OpenAI-compatible endpoint: pick a preset (Doubao, GPT-4o, GLM-4V, Qwen-VL) or enter your own Base URL / model / API key.
+- 🤖 **AI Auto-Reply** — understands chat content visually and generates natural replies (with anti-self-loop protection), and skips when no reply is needed
+- 👥 **Customer Auto-Profiling (CRM)** — contacts are automatically archived after chatting; supports tags, categories and stats; every conversation is summarized and remembered long-term, then injected into the next reply — it remembers every customer across sessions
+- 📚 **Knowledge Base** — maintain Q&A entries (with batch import); enabled entries are auto-injected into every reply so answers follow your business facts
+- 🎭 **Persona System** — 5 built-in personas (medical expert / butler / sports coach / psychologist / sales consultant) plus custom personas, switchable in one click
+- 🖼 **Image Message Reading** — when a customer sends an image, it automatically opens the full-size image, reads its content (photo / screenshot text / sticker), then replies
+- 🔍 **Pure-Vision RPA** — unread detection, clicking, typing and sending are all vision-driven; works with WeChat, WeCom, DingTalk, Feishu and other desktop apps
+- 🧠 **Working Memory** — every run accumulates experience cards; the system gets better at your business over time
+- 🔌 **Multi-Model Support** — chat and vision models are **independently configurable**: Volcengine Ark (Standard / Agent Plan), OpenAI, Zhipu GLM, Qwen, or any OpenAI-compatible endpoint
 
 ---
 
 ## 🚀 Getting Started
 
-财听猫 Desktop Agent is a cross-platform client built on **Electron · electron-vite · React · TypeScript**, driven by a Vision-Language Model (VLM).
-
-**Prerequisites:** Node.js (LTS) and npm.
-
-### 1. Install dependencies
+**Prerequisites:** Node.js (LTS) + npm
 
 ```bash
+# 1. Install dependencies
 npm install
-```
 
-### 2. Run in development
-
-```bash
+# 2. Run in development
 npm run dev
-```
 
-> On first launch, pick your **target application** and complete the region selection, then open **Settings** to enter your API key and confirm the active Provider.
-
-### 3. Build a release
-
-```bash
+# 3. Build a release
 npm run build:win     # Windows
 npm run build:mac     # macOS
-npm run build:linux   # Linux
 ```
+
+**On first launch:** pick your target app (WeChat / WeCom / DingTalk / Feishu …) → let VLM measure the layout automatically (or select regions manually) → enter your API key in Settings → start the engine and let it work.
 
 ---
 
 ## ⚙️ Configuration
 
-Desktop configuration has two layers:
+| Section | Description |
+| :-- | :-- |
+| **Base Configuration** | Vision model (layout detection / unread detection / image reading): API Key, Base URL, model — supports Standard Ark, Agent Plan and any OpenAI-compatible endpoint |
+| **Agent** | Chat reply model: built-in Doubao Seed, or any other provider |
+| **Personas** | Switch built-in personas or define custom role prompts |
+| **Knowledge Base / Customers** | Standalone windows to manage Q&A entries and customer profiles |
 
-- **Base configuration** — a Volcengine Ark API key powering visual grounding and the built-in Doubao agent.
-- **Agent / Provider** — the provider responsible for chat analysis and reply generation.
-
-### What the key is used for
-
-1. **Smart replies** — the model analyzes chat-window screenshots and generates natural responses (with an anti-self-loop guard).
-2. **VLM visual grounding** — from a screenshot and a prompt, the model locates on-screen UI controls and returns click coordinates, driving a pure-vision RPA flow.
-
-### Steps
-
-1. Open [Volcengine Console → Ark](https://console.volcengine.com/ark), enable the service, and generate your API key.
-2. Launch the app and click the settings button at the bottom-right of the main window.
-3. Under **Base configuration**, enter the API key. The default Base URL `https://ark.cn-beijing.volces.com/api/v3` rarely needs changing.
-4. Under **Agent**, select the active Provider. The built-in default is **Doubao Seed** (`doubao-seed-2-0-lite-260215`).
-
-### Interface preview
-
-| Main | Base Configuration | Agent / Provider |
-| :--: | :--: | :--: |
-| <img width="240" alt="财听猫 main window" src="./docs/images/main.png" /> | <img width="360" alt="财听猫 base configuration" src="./docs/images/settings-base.png" /> | <img width="360" alt="财听猫 agent configuration" src="./docs/images/settings-provider.png" /> |
-
-### Target applications & selection mode
-
-The main window offers a **Target Application** shortcut that decides how the desktop client measures the chat-window layout:
-
-- **WeChat** and **WeCom** use VLM auto-detection of the window region by default.
-- **DingTalk, Feishu, Slack, Telegram**, and other desktop apps default to **manual selection**.
-- When manual selection is required, click **Start Selection** and outline three regions in order: the **conversation list**, the **chat content area**, and the **input box**.
-- Selections are saved locally per target application and reused on subsequent launches; you can re-select at any time.
-
-> VLM vs. manual selection only affects *how layout is measured*. Runtime screenshots, content analysis, reply generation, and message sending all consume the same layout result.
-
-### Provider Hub
-
-财听猫 abstracts "analyze a screenshot and generate a reply" into an independent **Provider**. A provider declares its config schema via `manifest.json` and, through its bundle entry, receives a chat screenshot and returns `reply_text`, `skip`, and `error` events.
-
-- The candidate list is fetched by default from `https://github.com/x18677770772-png/richcat-desktop-agent/provider-hub.json`.
-- The hub only tracks each provider's `manifestUrl`; UI fields come from each provider's manifest.
-- Results are cached locally after first load; the local cache is preferred unless you refresh via the button next to the Agent title.
-- **Doubao Seed** is always retained locally as the default provider, so there is always an option if the remote list is unavailable.
-
-External provider integration is documented in the [Chat Provider docs](./docs/provider.md). A Doubao / Volcengine Ark sample remains in the repo for reference:
-
-```text
-resources/providers/volcengine-ark/manifest.json
-resources/providers/volcengine-ark/provider.bundle.js
-```
-
-> **Recommended dev setup:** [VS Code](https://code.visualstudio.com/) + [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint) + [Prettier](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode).
+> All data is stored locally (`%APPDATA%/RichCat`) — never uploaded to any server.
 
 ---
 
-## 🔐 Security & Data Ownership
+## 🏗 Tech Stack
 
-财听猫's work traces are stored **locally by default** — never uploaded to any server, never included in any public training dataset. Open-source code does **not** mean open data: **your work data always belongs to you.**
-
----
-
-## 🤝 Contributing & Community
-
-We believe **Agent Computer-Use will be foundational infrastructure for the next decade of AI**. If you want to help build it, come join us.
-
-- 💬 **[Join our Discord](https://discord.com/invite/8H6KpbXq3t)** — co-build with the community.
-- ⭐ **[Star the repo](https://github.com/x18677770772-png/richcat-desktop-agent)** — it genuinely helps.
-- 🛠 **Contribute** — issues and pull requests are welcome.
+Electron · electron-vite · React · TypeScript · VLM (Vision-Language Model) · node-window-manager · robotjs
 
 ---
 
 ## 📄 License
 
-Released under the [Apache License 2.0](LICENSE).
+[Apache License 2.0](LICENSE)
 
 ---
 
-## 📬 Contact
+## 🙏 Acknowledgements
 
-- 🌐 **GitHub:** https://github.com/x18677770772-png/richcat-desktop-agent
+This is a personal derivative project. **The technical foundation is based on the open-source project [SightFlow](https://github.com/sightflow-dev/sightflow-desktop-agent) (SightFlow Desktop Agent)** — an excellent Electron + VLM desktop agent framework. Thanks to the original author, the sightflow-dev team, for their open-source contribution.
 
-- 💬 **Discord:** [Join the server](https://discord.com/invite/8H6KpbXq3t)
-
-<div align="center"><sub>© 2026 财听猫. Released under the Apache License 2.0.</sub></div>
-
-<p align="right"><a href="#readme-top">↑ Back to top</a></p>
+<div align="center"><sub>© 2026 RichCat (财听猫). Released under the Apache License 2.0.</sub></div>
