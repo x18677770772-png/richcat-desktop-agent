@@ -5,6 +5,7 @@ import MemoryWindow from './MemoryWindow'
 import KnowledgeWindow from './KnowledgeWindow'
 import CustomerWindow from './CustomerWindow'
 import PersonaPanel from './PersonaPanel'
+import FeaturePanel from './FeaturePanel'
 import './index.css'
 
 interface LogEntry {
@@ -14,7 +15,7 @@ interface LogEntry {
 }
 
 type EngineStatus = 'idle' | 'running' | 'error'
-type SettingsSection = 'base' | 'agent' | 'persona'
+type SettingsSection = 'base' | 'agent' | 'persona' | 'features'
 type AppType = 'wechat' | 'wework' | 'dingtalk' | 'lark' | 'slack' | 'telegram' | 'generic'
 
 type CaptureStrategy = 'auto' | 'vlm' | 'box-select'
@@ -759,6 +760,12 @@ function SettingsWindow(): React.JSX.Element {
         >
           角色设定
         </button>
+        <button
+          className={`settings-nav-item ${section === 'features' ? 'active' : ''}`}
+          onClick={() => setSection('features')}
+        >
+          功能开关
+        </button>
       </aside>
 
       <main className="settings-main">
@@ -766,6 +773,8 @@ function SettingsWindow(): React.JSX.Element {
           <SettingsPanel />
         ) : section === 'persona' ? (
           <PersonaPanel />
+        ) : section === 'features' ? (
+          <FeaturePanel />
         ) : (
           <AgentPanel />
         )}

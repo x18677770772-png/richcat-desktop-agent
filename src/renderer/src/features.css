@@ -1,0 +1,148 @@
+/* src/renderer/src/features.css —— 功能开关面板（C0），独立文件避免改动 index.css */
+
+.feature-panel-card {
+  padding: 20px;
+}
+
+.feature-panel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.feature-panel-toolbar .form-hint {
+  margin: 0;
+  flex: 1;
+}
+
+.feature-panel-loading {
+  padding: 32px 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.feature-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.feature-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 4px;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.feature-row:last-child {
+  border-bottom: none;
+}
+
+.feature-row-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.feature-row-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.feature-row-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.feature-badge {
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: var(--radius-full);
+}
+
+.feature-badge.on {
+  color: var(--accent);
+  background: var(--accent-subtle);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.feature-badge.off {
+  color: var(--text-secondary);
+  background: var(--bg-glass-input, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--glass-border);
+}
+
+.feature-badge.changed {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.feature-row-desc {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.feature-row-note {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.feature-row-meta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: rgba(240, 240, 245, 0.35);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* ── 开关（Switch） ── */
+.feature-switch {
+  position: relative;
+  flex: none;
+  width: 42px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--glass-border-light);
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease;
+  -webkit-app-region: no-drag;
+}
+
+.feature-switch:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.feature-switch.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.feature-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: transform 0.18s ease;
+}
+
+.feature-switch.on .feature-switch-thumb {
+  transform: translateX(18px);
+}

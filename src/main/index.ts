@@ -46,6 +46,13 @@ import { induceCardsFromSession } from '../core/memory/learn-from-session'
 import { PersonaStore, NewPersona } from '../core/persona/persona-store'
 import { KnowledgeStore, NewKnowledgeItem } from '../core/knowledge/knowledge-store'
 import { CustomerStore, CustomerPatch } from '../core/customers/customer-store'
+// ── V2 功能开关（Feature Flags，阶段 0 / C0）──
+import {
+  FeatureFlags,
+  FeatureFlagKey,
+  isFeatureFlagKey,
+  normalizeFeatures
+} from '../core/features/flags'
 const StoreClass = typeof Store === 'function' ? Store : ((Store as any).default as typeof Store)
 
 // ── 多开支持：--profile=<name> 数据隔离 ──
@@ -111,6 +118,8 @@ interface AppSettings {
   defaultCaptureStrategy: CaptureStrategy
   // 每个 appType 独立保存的策略 + 框选区域
   capture: Partial<Record<AppType, PerAppCapture>>
+  // V2 功能开关（白名单校验，见 src/core/features/flags.ts；缺失 key 用默认值）
+  features: Partial<Record<FeatureFlagKey, boolean>>
 }
 
 type ProviderConfigFieldType = 'text' | 'password' | 'url' | 'select' | 'textarea'
@@ -179,6 +188,15 @@ const settingsStore = new StoreClass({
     capture: {}
   }
 })
+
+// ── V2 功能开关单例：读取归一化后的 settings.features，写入回 settingsStore ──
+const featureFlags = new FeatureFlags(
+  () => normalizeSettings(settingsStore.store).features,
+  (flags) => {
+    // 用 key-path 写入，避免整对象合并时的类型强转
+    settingsStore.set('features', flags)
+  }
+)
 
 let runtime: RuntimeHost<ReturnType<typeof createInitialGenericChannelState>> | null = null
 let runtimeDevice: DesktopDevice | null = null
@@ -653,6 +671,24 @@ app.whenReady().then(async () => {
     } satisfies AppSettings
 
     settingsStore.set(next as any)
+    return { success: true }
+  })
+
+  // ── V2 功能开关 IPC（features:*；值合并默认值，非法 key 一律拒绝） ──
+  ipcMain.handle('features:getAll', async () => {
+    return featureFlags.getAll()
+  })
+
+  ipcMain.handle('features:get', async (_event, key: unknown) => {
+    if (!isFeatureFlagKey(key)) return false
+    return featureFlags.isEnabled(key)
+  })
+
+  ipcMain.handle('features:set', async (_event, payload: { key?: unknown; value?: unknown }) => {
+    if (!payload || !isFeatureFlagKey(payload.key) || typeof payload.value !== 'boolean') {
+      return { success: false, error: 'invalid_feature_flag_payload' }
+    }
+    featureFlags.set(payload.key, payload.value)
     return { success: true }
   })
 
@@ -1492,7 +1528,8 @@ function normalizeSettings(raw: any): AppSettings {  const oldApiKey = typeof ra
       config: rawProviderConfig
     },
     defaultCaptureStrategy: coerceStrategy(raw?.defaultCaptureStrategy, 'auto'),
-    capture: normalizeCapture(raw?.capture)
+    capture: normalizeCapture(raw?.capture),
+    features: normalizeFeatures(raw?.features)
   }
 }
 
