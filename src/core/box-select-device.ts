@@ -21,7 +21,7 @@ import {
   LayoutCache,
   setLayoutCache
 } from './rpa/vision-utils'
-import { captureChatMainArea } from './rpa/screenshot-utils'
+import { captureChatContextArea, captureChatMainArea } from './rpa/screenshot-utils'
 import {
   activeUnreadByClickAction,
   clickUnreadContactAction,
@@ -111,8 +111,10 @@ export class BoxSelectDevice implements DesktopDevice {
 
   // 把 chatMain 区域截图作为"会话上下文"返回给 provider VLM 分析。
   // 比起 RPADevice 整窗截图，这里更聚焦于聊天内容，省 token 且与目标 app 无关。
+  // 优先截「聊天区 + header」：模型需要看到联系人名称才能识别客户（CRM 自动建档）。
   async screenshot(): Promise<string> {
-    const image = await captureChatMainArea(this.appType)
+    const image =
+      (await captureChatContextArea(this.appType)) ?? (await captureChatMainArea(this.appType))
     if (!image) {
       throw new Error('chatMain 截图失败')
     }

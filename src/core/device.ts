@@ -17,6 +17,12 @@ export interface DesktopDevice {
   setAppType(appType: AppType): void
   setApiKey(apiKey: string): void
 
+  /**
+   * 设置视觉模型配置（可选能力）：apiKey + OpenAI 兼容 baseURL + 模型名。
+   * RPADevice 实现（VLM 布局检测 / 红点检测 / 图片读取用）；BoxSelectDevice 为 no-op。
+   */
+  setVisionConfig?(config: { apiKey: string; baseURL?: string; model?: string }): void
+
   // ── 生命周期 ──
   // session 启停时由 GenericChannelSession 调用，给设备机会做缓存初始化 / 清理。
   // 默认实现可为 no-op；设备在 onSessionStop 里清掉布局和 baseline。
@@ -96,4 +102,12 @@ export interface DesktopDevice {
 
   /** 点击指定坐标 */
   clickAt(x: number, y: number): Promise<void>
+
+  /**
+   * 检测当前对话中对方最新发来的图片消息，并点开读取大图内容（可选能力）。
+   * 返回图片内容的中文描述；无图片 / 读取失败返回 null。
+   * 实现方负责：定位气泡 → 点击 → 等查看器打开 → 截大图 → 读图 → Esc 关闭。
+   * 仅 RPADevice（VLM 路线）实现；BoxSelectDevice 不实现（返回 undefined）。
+   */
+  analyzeIncomingImage?(): Promise<string | null>
 }

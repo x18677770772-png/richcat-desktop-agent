@@ -8,6 +8,14 @@ export interface ProviderInput {
   ocrText?: string
   /** 运行时注入的经验卡片（工作记忆）。Provider 可拼入 system prompt。 */
   memoryCards?: MemoryCardBrief[]
+  /** 当前角色的完整 system prompt（人设系统）。Provider 优先采用。 */
+  personaPrompt?: string
+  /** 知识库注入段（已格式化 markdown）。Provider 可拼入 system prompt。 */
+  knowledgeSection?: string
+  /** 客户长期记忆注入段（已格式化 markdown）。Provider 可拼入 system prompt。 */
+  customerSection?: string
+  /** 对方发来的图片内容（已由设备点开大图读取的描述文本）。Provider 可拼入 system prompt。 */
+  imageContext?: string
 }
 
 export type ProviderEvent =

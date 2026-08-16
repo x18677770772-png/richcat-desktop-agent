@@ -282,38 +282,81 @@ export async function captureScreenRegion(rect: ScreenRect): Promise<{
  * 用于 diff 检测：对比前后两张 chatMainArea 截图判断是否有新消息
  */
 export async function captureChatMainArea(appType: AppType): Promise<Electron.NativeImage | null> {
+  return captureChatAreaImpl(appType, false)
+}
+
+/**
+ * 截图「聊天区 + 顶部 header（联系人名称）」区域，返回 NativeImage
+ *
+ * provider 分析会话上下文用：模型需要从截图里看到当前对话的联系人名称
+ * 才能识别客户并写入客户档案（CRM 自动建档依赖它）。
+ * 与 captureChatMainArea 的唯一区别是 crop 区域向上并入 headerArea。
+ */
+export async function captureChatContextArea(
+  appType: AppType
+): Promise<Electron.NativeImage | null> {
+  return captureChatAreaImpl(appType, true)
+}
+
+/** 两个矩形取并集（用于把 header 并入聊天区截图） */
+function unionRects(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number }
+): { x: number; y: number; width: number; height: number } {
+  const x = Math.min(a.x, b.x)
+  const y = Math.min(a.y, b.y)
+  const right = Math.max(a.x + a.width, b.x + b.width)
+  const bottom = Math.max(a.y + a.height, b.y + b.height)
+  return { x, y, width: right - x, height: bottom - y }
+}
+
+async function captureChatAreaImpl(
+  appType: AppType,
+  includeHeader: boolean
+): Promise<Electron.NativeImage | null> {
   try {
     // 延迟导入避免循环引用
     const { getLayoutCache, bboxToCropBounds } = await import('./vision-utils')
 
     const layout = getLayoutCache(appType)
     if (!layout?.chatMainArea) {
-      console.log('[captureChatMainArea] 未找到 chatMainArea 缓存')
+      console.log('[captureChatArea] 未找到 chatMainArea 缓存')
       return null
     }
 
     if (layout.chatMainArea.rect) {
-      const screenshotResult = await captureScreenRegion(layout.chatMainArea.rect)
+      let rect = layout.chatMainArea.rect
+      if (includeHeader && layout.headerArea?.rect) {
+        rect = unionRects(rect, layout.headerArea.rect)
+      }
+      const screenshotResult = await captureScreenRegion(rect)
       if (!screenshotResult.success || !screenshotResult.nativeImage) {
-        console.log('[captureChatMainArea] 绝对区域截图失败:', screenshotResult.error)
+        console.log('[captureChatArea] 绝对区域截图失败:', screenshotResult.error)
         return null
       }
       return screenshotResult.nativeImage
     }
 
     if (!layout.chatMainArea.bbox) {
-      console.log('[captureChatMainArea] chatMainArea 缺少 bbox/rect')
+      console.log('[captureChatArea] chatMainArea 缺少 bbox/rect')
       return null
     }
 
     const windowInfo = await getWindowInfo(appType, false)
     if (!windowInfo?.bounds) {
-      console.log('[captureChatMainArea] 获取窗口信息失败')
+      console.log('[captureChatArea] 获取窗口信息失败')
       return null
     }
 
     // 从归一化 bbox (0-1000) 计算出 crop 区域（逻辑像素）
-    const cropBounds = bboxToCropBounds(layout.chatMainArea.bbox, windowInfo.bounds)
+    let cropBounds = bboxToCropBounds(layout.chatMainArea.bbox, windowInfo.bounds)
+    if (includeHeader && layout.headerArea?.bbox) {
+      // 并入 header（联系人名称所在区域），让 provider 能识别当前对话对象
+      cropBounds = unionRects(
+        cropBounds,
+        bboxToCropBounds(layout.headerArea.bbox, windowInfo.bounds)
+      )
+    }
     const crop = {
       x: cropBounds.x,
       y: cropBounds.y,
@@ -323,7 +366,7 @@ export async function captureChatMainArea(appType: AppType): Promise<Electron.Na
 
     const screenshotResult = await captureWechatWindow(appType, crop)
     if (!screenshotResult.success) {
-      console.log('[captureChatMainArea] 截图失败:', screenshotResult.error)
+      console.log('[captureChatArea] 截图失败:', screenshotResult.error)
       return null
     }
 
@@ -331,7 +374,7 @@ export async function captureChatMainArea(appType: AppType): Promise<Electron.Na
       return screenshotResult.nativeImage
     }
 
-    console.log('[captureChatMainArea] 截图结果无 nativeImage:', {
+    console.log('[captureChatArea] 截图结果无 nativeImage:', {
       appType,
       crop,
       keys: Object.keys(screenshotResult),
@@ -339,7 +382,7 @@ export async function captureChatMainArea(appType: AppType): Promise<Electron.Na
     })
     return null
   } catch (error: any) {
-    console.error('[captureChatMainArea] 异常:', error)
+    console.error('[captureChatArea] 异常:', error)
     return null
   }
 }

@@ -86,7 +86,30 @@ export class GenericChannelSession implements ChannelSession<GenericChannelState
           summary: '截取当前聊天窗口',
           screenshotBase64: screenshot
         })
-        void this.forwardProviderEvents(screenshot, ctx)
+
+        // 尝试点开并读取对方最新发来的图片（可选能力；失败不阻断回复）
+        let imageContext: string | null = null
+        if (this.device.analyzeIncomingImage) {
+          try {
+            imageContext = await this.device.analyzeIncomingImage()
+            if (imageContext) {
+              ctx.host.log(
+                'thinking',
+                `已点开读取对方发来的图片：${imageContext.slice(0, 80)}${imageContext.length > 80 ? '…' : ''}`
+              )
+              ctx.host.trace({
+                phase: 'observe',
+                summary: '点开并读取对方发来的图片',
+                reasoning: { content: imageContext },
+                outcome: { status: 'ok' }
+              })
+            }
+          } catch (error: unknown) {
+            console.error('[Session] 图片读取失败（忽略，继续回复流程）:', error)
+          }
+        }
+
+        void this.forwardProviderEvents(screenshot, ctx, imageContext ?? undefined)
         break
       }
 
@@ -211,12 +234,14 @@ export class GenericChannelSession implements ChannelSession<GenericChannelState
 
   private async forwardProviderEvents(
     screenshot: string,
-    ctx: ChannelContext<GenericChannelState>
+    ctx: ChannelContext<GenericChannelState>,
+    imageContext?: string
   ): Promise<void> {
     try {
       for await (const event of ctx.host.runProvider({
         screenshot,
-        appType: ctx.appType
+        appType: ctx.appType,
+        imageContext
       })) {
         if (!ctx.host.isRunning()) break
 

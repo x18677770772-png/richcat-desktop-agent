@@ -2,6 +2,9 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { t } from './i18n'
 import logoUrl from './assets/logo.png'
 import MemoryWindow from './MemoryWindow'
+import KnowledgeWindow from './KnowledgeWindow'
+import CustomerWindow from './CustomerWindow'
+import PersonaPanel from './PersonaPanel'
 import './index.css'
 
 interface LogEntry {
@@ -11,7 +14,7 @@ interface LogEntry {
 }
 
 type EngineStatus = 'idle' | 'running' | 'error'
-type SettingsSection = 'base' | 'agent'
+type SettingsSection = 'base' | 'agent' | 'persona'
 type AppType = 'wechat' | 'wework' | 'dingtalk' | 'lark' | 'slack' | 'telegram' | 'generic'
 
 type CaptureStrategy = 'auto' | 'vlm' | 'box-select'
@@ -126,6 +129,8 @@ interface AppSettings {
   appType: AppType
   vision: {
     apiKey: string
+    baseURL?: string
+    model?: string
   }
   chatProvider: {
     manifestUrl: string
@@ -140,7 +145,7 @@ const BUILTIN_PROVIDER_CATALOG: ProviderCatalogItem[] = [
   {
     id: 'doubao',
     name: '豆包 Seed',
-    description: '本地内置聊天 Provider，使用基础配置中的火山方舟密钥。',
+    description: '本地内置聊天 Provider，默认使用基础配置中的火山方舟密钥。',
     version: '1.0.0',
     manifestUrl: 'builtin://doubao',
     capabilities: ['chat'],
@@ -150,16 +155,7 @@ const BUILTIN_PROVIDER_CATALOG: ProviderCatalogItem[] = [
           key: 'apiKey',
           label: 'API Key',
           type: 'password',
-          required: true,
-          placeholder: '输入火山方舟 API Key'
-        },
-        {
-          key: 'model',
-          label: '模型',
-          type: 'text',
-          required: true,
-          readonly: true,
-          defaultValue: 'doubao-seed-2-0-lite-260428'
+          placeholder: '留空则使用基础配置中的视觉密钥'
         },
         {
           key: 'baseURL',
@@ -168,13 +164,68 @@ const BUILTIN_PROVIDER_CATALOG: ProviderCatalogItem[] = [
           placeholder: 'https://ark.cn-beijing.volces.com/api/v3'
         },
         {
+          key: 'model',
+          label: '模型',
+          type: 'text',
+          required: true,
+          defaultValue: 'doubao-seed-2-0-lite-260428'
+        },
+        {
           key: 'systemPrompt',
           label: '系统提示词',
           type: 'textarea',
-          placeholder: '你是一个微信自动回复助手。根据截图中的聊天内容，生成合适的回复...'
+          placeholder: '留空则使用默认客服提示词（角色设定优先于此）'
         }
       ]
     }
+  }
+]
+
+/** 常用多模态（支持图片输入）服务商预设，一键填充 Base URL / 模型 */
+const PROVIDER_PRESETS: Array<{
+  id: string
+  label: string
+  baseURL: string
+  model: string
+  hint?: string
+}> = [
+  {
+    id: 'ark',
+    label: '火山方舟 · 豆包',
+    baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
+    model: 'doubao-seed-2-0-lite-260215'
+  },
+  {
+    id: 'ark-plan',
+    label: '火山方舟 · Agent Plan',
+    baseURL: 'https://ark.cn-beijing.volces.com/api/plan/v3',
+    model: 'doubao-seed-2.1-turbo',
+    hint: '需已订阅 Agent Plan，并填写其专属 API Key（方舟控制台 → 开通管理 → Agent Plan → API Key 管理）'
+  },
+  {
+    id: 'openai',
+    label: 'OpenAI · GPT-4o',
+    baseURL: 'https://api.openai.com/v1',
+    model: 'gpt-4o-mini'
+  },
+  {
+    id: 'zhipu',
+    label: '智谱 · GLM-4V',
+    baseURL: 'https://open.bigmodel.cn/api/paas/v4',
+    model: 'glm-4v-flash'
+  },
+  {
+    id: 'dashscope',
+    label: '通义 · Qwen-VL',
+    baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen-vl-plus'
+  },
+  {
+    id: 'custom',
+    label: '自定义（OpenAI 兼容）',
+    baseURL: '',
+    model: '',
+    hint: '任何 OpenAI 兼容 /chat/completions 端点；模型需支持图片输入（VLM）'
   }
 ]
 
@@ -267,10 +318,28 @@ function App() {
     )
   }
 
+  if (windowKind === 'knowledge') {
+    return (
+      <div className="app settings-window">
+        <KnowledgeWindow />
+        <Toast />
+      </div>
+    )
+  }
+
+  if (windowKind === 'customer') {
+    return (
+      <div className="app settings-window">
+        <CustomerWindow />
+        <Toast />
+      </div>
+    )
+  }
+
   return (
     <div className="app">
       <header className="app-header">
-        <img src={logoUrl} alt="SightFlow" className="app-logo" />
+        <img src={logoUrl} alt="财听猫" className="app-logo" />
       </header>
 
       <div className="app-content">
@@ -619,12 +688,46 @@ function BottomBar({
       </button>
       <button
         className="bottom-btn bottom-btn-settings"
+        onClick={() => window.electron?.invoke('knowledge:open')}
+        title="知识库"
+      >
+        <BookIcon />
+      </button>
+      <button
+        className="bottom-btn bottom-btn-settings"
+        onClick={() => window.electron?.invoke('customer:open')}
+        title="客户管理"
+      >
+        <UsersIcon />
+      </button>
+      <button
+        className="bottom-btn bottom-btn-settings"
         onClick={() => window.electron?.invoke('settings:open')}
         title="设置"
       >
         <GearIcon />
       </button>
     </div>
+  )
+}
+
+function BookIcon(): React.JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+    </svg>
+  )
+}
+
+function UsersIcon(): React.JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
   )
 }
 
@@ -635,7 +738,7 @@ function SettingsWindow(): React.JSX.Element {
     <div className="settings-shell">
       <aside className="settings-sidebar">
         <div className="settings-sidebar-brand">
-          <img src={logoUrl} alt="SightFlow" className="app-logo" />
+          <img src={logoUrl} alt="财听猫" className="app-logo" />
           <span>设置</span>
         </div>
         <button
@@ -650,17 +753,79 @@ function SettingsWindow(): React.JSX.Element {
         >
           智能体
         </button>
+        <button
+          className={`settings-nav-item ${section === 'persona' ? 'active' : ''}`}
+          onClick={() => setSection('persona')}
+        >
+          角色设定
+        </button>
       </aside>
 
       <main className="settings-main">
-        {section === 'base' ? <SettingsPanel /> : <AgentPanel />}
+        {section === 'base' ? (
+          <SettingsPanel />
+        ) : section === 'persona' ? (
+          <PersonaPanel />
+        ) : (
+          <AgentPanel />
+        )}
       </main>
     </div>
   )
 }
 
+/** 视觉模型（VLM）服务商预设，一键填充 Base URL / 模型 */
+const VISION_PRESETS: Array<{
+  id: string
+  label: string
+  baseURL: string
+  model: string
+  hint?: string
+}> = [
+  {
+    id: 'ark',
+    label: '火山方舟 · 标准',
+    baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
+    model: 'doubao-seed-2-0-lite-260215'
+  },
+  {
+    id: 'ark-plan',
+    label: '火山方舟 · Agent Plan',
+    baseURL: 'https://ark.cn-beijing.volces.com/api/plan/v3',
+    model: 'doubao-seed-2.1-turbo',
+    hint: '需已订阅 Agent Plan 并填写其专属 API Key（方舟控制台 → 开通管理 → Agent Plan → API Key 管理），普通 ark-xxx 密钥会 401'
+  },
+  {
+    id: 'openai',
+    label: 'OpenAI · GPT-4o',
+    baseURL: 'https://api.openai.com/v1',
+    model: 'gpt-4o-mini'
+  },
+  {
+    id: 'zhipu',
+    label: '智谱 · GLM-4V',
+    baseURL: 'https://open.bigmodel.cn/api/paas/v4',
+    model: 'glm-4v-flash'
+  },
+  {
+    id: 'dashscope',
+    label: '通义 · Qwen-VL',
+    baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen-vl-plus'
+  },
+  {
+    id: 'custom',
+    label: '自定义（OpenAI 兼容）',
+    baseURL: '',
+    model: '',
+    hint: '任何 OpenAI 兼容 /chat/completions 端点；模型需支持图片输入（VLM）'
+  }
+]
+
 function SettingsPanel() {
   const [visionApiKey, setVisionApiKey] = useState('')
+  const [visionBaseUrl, setVisionBaseUrl] = useState('')
+  const [visionModel, setVisionModel] = useState('')
   const [testing, setTesting] = useState(false)
 
   useEffect(() => {
@@ -668,6 +833,8 @@ function SettingsPanel() {
       const settings = (await window.electron?.invoke('settings:getAll')) as AppSettings | undefined
       if (settings) {
         setVisionApiKey(settings.vision?.apiKey || '')
+        setVisionBaseUrl(settings.vision?.baseURL || '')
+        setVisionModel(settings.vision?.model || '')
       }
     }
 
@@ -676,23 +843,29 @@ function SettingsPanel() {
 
   const handleSaveVision = useCallback(async () => {
     const payload: Partial<AppSettings> = {
-      vision: { apiKey: visionApiKey }
+      vision: {
+        apiKey: visionApiKey,
+        baseURL: visionBaseUrl.trim(),
+        model: visionModel.trim()
+      }
     }
     await window.electron?.invoke('settings:set', payload)
     await window.electron?.invoke('engine:updateConfig', {
       ...((await window.electron?.invoke('settings:getAll')) as AppSettings),
       ...payload,
-      vision: { apiKey: visionApiKey }
+      vision: { apiKey: visionApiKey, baseURL: visionBaseUrl.trim(), model: visionModel.trim() }
     })
     showToast(t('settings.saved'), 'success')
-  }, [visionApiKey])
+  }, [visionApiKey, visionBaseUrl, visionModel])
 
   const handleTestConnection = useCallback(async () => {
     if (!visionApiKey) return
     setTesting(true)
     try {
       const result = await window.electron?.invoke('engine:testConnection', {
-        apiKey: visionApiKey
+        apiKey: visionApiKey,
+        baseURL: visionBaseUrl.trim() || undefined,
+        model: visionModel.trim() || undefined
       })
       if (result?.success) {
         showToast(t('settings.testConnection.success'), 'success')
@@ -704,7 +877,7 @@ function SettingsPanel() {
     } finally {
       setTesting(false)
     }
-  }, [visionApiKey])
+  }, [visionApiKey, visionBaseUrl, visionModel])
 
   return (
     <div className="settings-page slide-up">
@@ -732,13 +905,48 @@ function SettingsPanel() {
         </div>
 
         <div className="form-group">
+          <label className="form-label">视觉模型预设</label>
+          <select
+            className="form-input"
+            defaultValue=""
+            onChange={(event) => {
+              const preset = VISION_PRESETS.find((p) => p.id === event.target.value)
+              if (!preset) return
+              setVisionBaseUrl(preset.baseURL)
+              setVisionModel(preset.model)
+            }}
+          >
+            <option value="" disabled>
+              选择预设自动填充 Base URL 与模型…
+            </option>
+            {VISION_PRESETS.map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.label}
+              </option>
+            ))}
+          </select>
+          <div className="form-hint">{buildVisionHint(visionBaseUrl)}</div>
+        </div>
+
+        <div className="form-group">
           <label className="form-label">{t('settings.visionModel')}</label>
-          <input className="form-input" value="doubao-seed-2-0-lite-260215" disabled />
+          <input
+            className="form-input"
+            value={visionModel}
+            onChange={(e) => setVisionModel(e.target.value)}
+            placeholder="doubao-seed-2-0-lite-260215"
+          />
         </div>
 
         <div className="form-group">
           <label className="form-label">{t('settings.visionBaseUrl')}</label>
-          <input className="form-input" value="https://ark.cn-beijing.volces.com/api/v3" disabled />
+          <input
+            className="form-input"
+            type="url"
+            value={visionBaseUrl}
+            onChange={(e) => setVisionBaseUrl(e.target.value)}
+            placeholder="https://ark.cn-beijing.volces.com/api/v3"
+          />
         </div>
 
         <div style={{ display: 'flex', gap: 8 }}>
@@ -756,6 +964,24 @@ function SettingsPanel() {
       </div>
     </div>
   )
+}
+
+/** 根据 Base URL 动态给出视觉模型配置提示（Agent Plan 端点需专属 Key） */
+function buildVisionHint(baseUrl: string): string {
+  const url = (baseUrl || '').trim().replace(/\/+$/, '')
+  if (url.includes('/api/plan/')) {
+    return '⚠️ Agent Plan 专属端点：API Key 必须填 Agent Plan 专属 Key（方舟控制台 → 开通管理 → Agent Plan → API Key 管理），普通 ark-xxx 密钥会 401；模型需支持图片输入（VLM）。'
+  }
+  if (url.includes('/api/coding/')) {
+    return '⚠️ Coding Plan 专属端点：需 Coding Plan 专属 Key；如无订阅请改用标准 /api/v3 端点。'
+  }
+  if (url.includes('volces.com')) {
+    return '火山方舟标准端点：使用上方 API Key 调用。'
+  }
+  if (!url) {
+    return '留空则使用默认火山方舟端点（/api/v3）。视觉模型负责布局检测、未读识别与图片读取，必须支持图片输入（VLM）。'
+  }
+  return '自定义 OpenAI 兼容端点：请填写对应服务商的 API Key；模型必须支持图片输入（VLM）。'
 }
 
 function AgentPanel(): React.JSX.Element {
@@ -783,20 +1009,32 @@ function AgentPanel(): React.JSX.Element {
       setCurrentSettings(settings || null)
       setActiveId(nextActiveId)
       setSelectedId((current) => current || nextActiveId || BUILTIN_PROVIDER_CATALOG[0]?.id || nextCatalog[0]?.id || '')
-      setProviderDrafts((prev) => ({
-        ...prev,
-        doubao: {
-          ...getProviderDefaults(BUILTIN_PROVIDER_CATALOG[0]),
-          ...(prev.doubao || {}),
-          ...(!settings?.chatProvider?.installed ? settings?.chatProvider?.config || {} : {}),
-          apiKey: prev.doubao?.apiKey || settings?.vision?.apiKey || ''
-        },
-        [nextActiveId]: {
-          ...getProviderDefaults(nextCatalog.find((provider) => provider.id === nextActiveId)),
-          ...(prev[nextActiveId] || {}),
-          ...(settings?.chatProvider?.config || {})
+      setProviderDrafts((prev) => {
+        const savedConfig = !settings?.chatProvider?.installed
+          ? settings?.chatProvider?.config || {}
+          : {}
+        const savedBaseUrl = String(savedConfig.baseURL || '').trim().replace(/\/+$/, '')
+        // 标准 /api/v3 端点共享视觉密钥；Agent Plan / Coding Plan / 第三方端点使用独立密钥
+        const sharesVisionKey = !savedBaseUrl || savedBaseUrl.endsWith('/api/v3')
+        return {
+          ...prev,
+          doubao: {
+            ...getProviderDefaults(BUILTIN_PROVIDER_CATALOG[0]),
+            ...(prev.doubao || {}),
+            ...savedConfig,
+            apiKey:
+              prev.doubao?.apiKey ??
+              (sharesVisionKey
+                ? settings?.vision?.apiKey || ''
+                : String(savedConfig.apiKey || ''))
+          },
+          [nextActiveId]: {
+            ...getProviderDefaults(nextCatalog.find((provider) => provider.id === nextActiveId)),
+            ...(prev[nextActiveId] || {}),
+            ...(settings?.chatProvider?.config || {})
+          }
         }
-      }))
+      })
 
       if (result && !result.success) {
         showToast(`智能体列表加载失败: ${result.error || ''}`, 'error')
@@ -842,14 +1080,61 @@ function AgentPanel(): React.JSX.Element {
 
       if (provider.id === 'doubao') {
         const { apiKey, ...providerConfig } = values
-        await window.electron?.invoke('settings:set', {
-          vision: { apiKey },
-          chatProvider: {
-            manifestUrl: '',
-            installed: null,
-            config: providerConfig
+        // 只有标准 OpenAI 兼容端点（/api/v3 或留空）才与视觉共享密钥；
+        // Agent Plan（/api/plan/v3）、Coding Plan（/api/coding/v3）等专属端点
+        // 必须使用独立密钥（专属 Key），否则会 401 鉴权失败
+        const baseUrl = (providerConfig.baseURL || '').trim().replace(/\/+$/, '')
+        const isStandardArk = !baseUrl || baseUrl.endsWith('/api/v3')
+
+        if (isStandardArk) {
+          // 标准方舟端点：仅当视觉模型也是标准方舟端点时才共享密钥（写入 vision.apiKey）；
+          // 若视觉模型用了 Agent Plan 等专属端点（vision.apiKey 是专属 Key），
+          // 聊天密钥改为独立存放，避免覆盖视觉专属 Key
+          const current = (await window.electron?.invoke('settings:getAll')) as AppSettings
+          const visionBaseUrl = String(current?.vision?.baseURL || '').trim().replace(/\/+$/, '')
+          const visionIsStandard = !visionBaseUrl || visionBaseUrl.endsWith('/api/v3')
+
+          if (visionIsStandard) {
+            await window.electron?.invoke('settings:set', {
+              vision: { apiKey },
+              chatProvider: {
+                manifestUrl: '',
+                installed: null,
+                config: providerConfig
+              }
+            })
+          } else {
+            const config = { ...providerConfig }
+            if (apiKey?.trim()) {
+              config.apiKey = apiKey.trim()
+            } else {
+              delete config.apiKey
+            }
+            await window.electron?.invoke('settings:set', {
+              chatProvider: {
+                manifestUrl: '',
+                installed: null,
+                config
+              }
+            })
           }
-        })
+        } else {
+          // 专属端点（Agent Plan / Coding Plan / 第三方）：独立密钥存 config，视觉密钥不动
+          const config = { ...providerConfig }
+          if (apiKey?.trim()) {
+            config.apiKey = apiKey.trim()
+          } else {
+            delete config.apiKey
+          }
+          await window.electron?.invoke('settings:set', {
+            chatProvider: {
+              manifestUrl: '',
+              installed: null,
+              config
+            }
+          })
+        }
+
         const settings = (await window.electron?.invoke('settings:getAll')) as AppSettings
         await window.electron?.invoke('engine:updateConfig', settings)
         setCurrentSettings(settings)
@@ -965,6 +1250,32 @@ function AgentPanel(): React.JSX.Element {
                 <span className="provider-version">v{selectedProvider.version}</span>
               </div>
 
+              {selectedProvider.id === 'doubao' && (
+                <div className="form-group">
+                  <label className="form-label">常用服务商预设</label>
+                  <select
+                    className="form-input"
+                    defaultValue=""
+                    onChange={(event) => {
+                      const preset = PROVIDER_PRESETS.find((p) => p.id === event.target.value)
+                      if (!preset) return
+                      setProviderValue('baseURL', preset.baseURL)
+                      setProviderValue('model', preset.model)
+                    }}
+                  >
+                    <option value="" disabled>
+                      选择预设自动填充 Base URL 与模型…
+                    </option>
+                    {PROVIDER_PRESETS.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="form-hint">{buildChatProviderHint(selectedValues.baseURL || '')}</p>
+                </div>
+              )}
+
               {selectedProvider.configSchema.fields.map((field) => (
                 <ProviderFieldInput
                   key={field.key}
@@ -1068,10 +1379,16 @@ function getProviderValues(
   if (!provider) return {}
   const defaults = getProviderDefaults(provider)
   if (provider.id === 'doubao') {
+    const savedConfig = settings?.chatProvider.installed ? {} : settings?.chatProvider.config || {}
+    const savedBaseUrl = String(savedConfig.baseURL || '').trim().replace(/\/+$/, '')
+    // 标准 /api/v3 端点共享视觉密钥；Agent Plan / Coding Plan / 第三方端点使用独立密钥
+    const sharesVisionKey = !savedBaseUrl || savedBaseUrl.endsWith('/api/v3')
     return {
       ...defaults,
-      ...(settings?.chatProvider.installed ? {} : settings?.chatProvider.config || {}),
-      apiKey: drafts.doubao?.apiKey || settings?.vision.apiKey || '',
+      ...savedConfig,
+      apiKey:
+        drafts.doubao?.apiKey ??
+        (sharesVisionKey ? settings?.vision.apiKey || '' : String(savedConfig.apiKey || '')),
       ...(drafts.doubao || {})
     }
   }
@@ -1089,6 +1406,24 @@ function getMissingRequiredFields(
   return provider.configSchema.fields
     .filter((field) => field.required && !values[field.key]?.trim())
     .map((field) => field.label)
+}
+
+/** 根据 Base URL 动态给出智能体配置提示（尤其是 Agent Plan 专属端点） */
+function buildChatProviderHint(baseUrl: string): string {
+  const url = (baseUrl || '').trim().replace(/\/+$/, '')
+  if (url.includes('/api/plan/')) {
+    return '⚠️ Agent Plan 专属端点：模型需填套餐支持的模型名（如 doubao-seed-2.1-turbo）；API Key 必须填 Agent Plan 专属 Key（方舟控制台 → 开通管理 → Agent Plan → API Key 管理），普通 ark-xxx 密钥会返回 401。'
+  }
+  if (url.includes('/api/coding/')) {
+    return '⚠️ Coding Plan 专属端点：需填 Coding Plan 专属 API Key，且官方仅允许在支持的编程工具中使用，直接调用可能被判违规；建议改用标准 /api/v3 端点。'
+  }
+  if (url.includes('volces.com')) {
+    return '火山方舟标准端点：API Key 留空则复用基础配置中的视觉密钥。'
+  }
+  if (!url) {
+    return 'Base URL 留空时使用默认火山方舟端点（/api/v3）。模型需支持图片输入（VLM）。'
+  }
+  return '第三方 OpenAI 兼容端点：请填写对应服务商的 API Key（独立密钥，不影响视觉密钥）；模型需支持图片输入（VLM）。'
 }
 
 let _showToast: ((msg: string, type: 'success' | 'error') => void) | null = null

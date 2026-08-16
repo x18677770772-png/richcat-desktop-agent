@@ -8,7 +8,7 @@ import { DesktopDevice } from './device'
 import { AIClient } from './ai-client'
 import { AppType } from './rpa/types'
 import { BBox } from './rpa/vision-utils'
-import { captureChatMainArea } from './rpa/screenshot-utils'
+import { captureChatContextArea, captureChatMainArea } from './rpa/screenshot-utils'
 import { sendReplyAction, activeUnreadByClickAction, clickUnreadContactAction } from './rpa/input-utils'
 import {
   hasUnreadMessage as hasUnreadMessageDetect,
@@ -28,6 +28,15 @@ import {
   setLayoutCache
 } from './rpa/vision-utils'
 import { getWechatWindowInfo } from './rpa/window-utils'
+import {
+  bboxToScreenCoords,
+  captureFullScreenImage,
+  detectIncomingImage,
+  pressEscape,
+  readImageContent,
+  waitForImageViewer
+} from './rpa/image-reading'
+import { captureWechatWindow } from './rpa/screenshot-utils'
 
 export class RPADevice implements DesktopDevice {
   private appType: AppType = 'wechat'
@@ -38,8 +47,17 @@ export class RPADevice implements DesktopDevice {
   }
 
   setApiKey(apiKey: string): void {
-    if (!apiKey) return
-    this.aiClient = new AIClient({ apiKey })
+    this.setVisionConfig({ apiKey })
+  }
+
+  /** 设置视觉模型配置（布局检测 / 红点检测 / 图片读取共用） */
+  setVisionConfig(config: { apiKey: string; baseURL?: string; model?: string }): void {
+    if (!config.apiKey) return
+    this.aiClient = new AIClient({
+      apiKey: config.apiKey,
+      baseURL: config.baseURL || undefined,
+      model: config.model || undefined
+    })
   }
 
   // ── 生命周期 ──
@@ -147,7 +165,8 @@ export class RPADevice implements DesktopDevice {
   }
 
   async screenshot(): Promise<string> {
-    const image = await captureChatMainArea(this.appType)
+    // 优先截「聊天区 + 顶部 header」：模型需要看到联系人名称才能识别客户
+    const image = (await captureChatContextArea(this.appType)) ?? (await captureChatMainArea(this.appType))
     if (!image) {
       throw new Error('聊天区截图失败')
     }
@@ -252,5 +271,67 @@ export class RPADevice implements DesktopDevice {
 
   async clickAt(x: number, y: number): Promise<void> {
     await clickUnreadContactAction([x, y])
+  }
+
+  /**
+   * 检测并读取对方最新发来的图片消息。
+   * 流程：全窗截图 → VLM 定位图片气泡 → 点击缩略图 → 等查看器打开
+   *       → 全屏截图 → VLM 读图 → Esc 关闭。
+   * 任何一步失败都安全返回 null（不阻断正常回复流程）。
+   */
+  async analyzeIncomingImage(): Promise<string | null> {
+    if (!this.aiClient) return null
+
+    try {
+      // 1. 全窗口截图（VLM 检测需要看到整个对话区）
+      const shot = await captureWechatWindow(this.appType)
+      if (!shot.success || !shot.screenshotBase64 || !shot.bounds) {
+        console.warn('[RPADevice] 图片检测：窗口截图失败')
+        return null
+      }
+
+      // 2. 检测对方最新图片消息气泡
+      const bbox: BBox | null = await detectIncomingImage(this.aiClient, shot.screenshotBase64)
+      if (!bbox) return null
+      console.log('[RPADevice] 检测到对方发来的图片:', bbox)
+
+      // 3. 归一化 bbox → 屏幕物理像素坐标，点击缩略图
+      const scaleFactor = shot.display?.scaleFactor ?? 1
+      const [clickX, clickY] = bboxToScreenCoords(bbox, shot.bounds, scaleFactor)
+      console.log(
+        `[RPADevice] 点击图片缩略图 (${clickX}, ${clickY}) scaleFactor=${scaleFactor}`
+      )
+      await this.clickAt(clickX, clickY)
+      await waitForImageViewer()
+
+      // 4. 全屏截图（微信图片查看器大图）
+      const fullScreen = await captureFullScreenImage()
+      if (!fullScreen) {
+        await pressEscape()
+        return null
+      }
+
+      // 5. VLM 读取大图内容
+      const content = await readImageContent(this.aiClient, fullScreen)
+
+      // 6. 关闭查看器，恢复聊天窗口
+      await pressEscape()
+      await new Promise((resolve) => setTimeout(resolve, 400))
+
+      const trimmed = content?.trim()
+      if (!trimmed) {
+        console.warn('[RPADevice] 图片内容读取为空')
+        return null
+      }
+      console.log('[RPADevice] 图片内容已读取:', trimmed.slice(0, 120))
+      return trimmed
+    } catch (error: unknown) {
+      console.error(
+        '[RPADevice] 图片读取异常（不阻断回复）:',
+        error instanceof Error ? error.message : String(error)
+      )
+      await pressEscape().catch(() => {})
+      return null
+    }
   }
 }

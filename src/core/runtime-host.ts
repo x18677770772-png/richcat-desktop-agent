@@ -20,6 +20,10 @@ interface RuntimeHostOptions<TState> {
   onTrace?: (step: TraceStepInput) => void
   /** 每轮 provider 调用前取当前启用的经验卡片，注入 ProviderInput */
   getMemoryCards?: () => MemoryCardBrief[]
+  /** 每轮 provider 调用前取当前角色的完整 system prompt（人设系统） */
+  getPersonaPrompt?: () => string | null
+  /** 每轮 provider 调用前取知识库注入段（已格式化 markdown） */
+  getKnowledgeSection?: () => string
   /** 会话结束（含内部错误停止）时回调，用于收尾轨迹会话 */
   onSessionEnd?: () => void
 }
@@ -100,11 +104,22 @@ export class RuntimeHost<TState> {
     }
   }
 
-  /** provider 调用前注入工作记忆（经验卡片），并记下卡片 id 供轨迹引用标记 */
+  /** provider 调用前注入工作记忆（经验卡片）、角色与知识库上下文 */
   private runProviderWithMemory(input: ProviderInput): AsyncIterable<ProviderEvent> {
     const cards = this.options.getMemoryCards?.() ?? []
     this.lastInjectedCardIds = cards.map((card) => card.cardId)
-    return this.options.provider.run(cards.length ? { ...input, memoryCards: cards } : input)
+
+    const personaPrompt = this.options.getPersonaPrompt?.() ?? undefined
+    const knowledgeSection = this.options.getKnowledgeSection?.() ?? undefined
+
+    const enriched: ProviderInput = {
+      ...input,
+      ...(cards.length ? { memoryCards: cards } : {}),
+      ...(personaPrompt ? { personaPrompt } : {}),
+      ...(knowledgeSection ? { knowledgeSection } : {})
+    }
+
+    return this.options.provider.run(enriched)
   }
 
   private trace(step: TraceStepInput): void {

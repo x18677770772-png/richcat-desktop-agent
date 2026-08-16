@@ -25,6 +25,18 @@ export function buildMemorySection(memoryCards?: MemoryCardBrief[]): string {
   return `\n\n## 团队经验（来自工作记忆，优先遵循）\n${lines.join('\n')}`
 }
 
+/**
+ * 把知识库条目拼成 system prompt 附加段。
+ * items 建议由 KnowledgeStore.getInjectionItems() 提供（已截断、限条数）。
+ */
+export function buildKnowledgeSection(
+  items?: Array<{ title: string; content: string }>
+): string {
+  if (!items || items.length === 0) return ''
+  const lines = items.map((item, index) => `${index + 1}. 【${item.title}】${item.content}`)
+  return `\n\n## 知识库（公司/业务资料，回答以此为准；知识库未覆盖时如实说明）\n${lines.join('\n')}`
+}
+
 const DEFAULT_MODEL = 'doubao-seed-2-0-lite-260215'
 const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
 
@@ -49,6 +61,78 @@ export class AIClient {
       model: config.model || DEFAULT_MODEL,
       baseURL: config.baseURL || DEFAULT_BASE_URL,
       systemPrompt: config.systemPrompt || REPLY_SYSTEM_PROMPT
+    }
+  }
+
+  /**
+   * 智能回复 — 一次视觉调用同时完成「识别当前联系人 + 判断是否回复 + 生成回复」。
+   *
+   * 输出 JSON：{"contact": "...", "reply": "..."}
+   * - contact: 截图里当前对话的联系人名称（昵称/备注名），无法识别时为 null
+   * - reply:   回复内容；null 表示本轮无需回复（等价 [SKIP]）
+   *
+   * 上下文注入（全部可选）：
+   * - systemPrompt: 角色 prompt（完整 system prompt，替代默认客服提示词）
+   * - knowledgeSection / customerSection / memoryCards: 知识库 / 客户记忆 / 团队经验段
+   *
+   * 容错：模型输出非法 JSON 时降级按旧格式（纯文本 / [SKIP]）解析，保证老模型可用。
+   */
+  async getSmartReply(
+    screenshotBase64: string,
+    ctx?: {
+      systemPrompt?: string
+      knowledgeSection?: string
+      customerSection?: string
+      memoryCards?: MemoryCardBrief[]
+      /** 对方发来的图片内容（设备已点开大图读取的描述） */
+      imageContext?: string
+    }
+  ): Promise<{ contact: string | null; reply: string | null; summary?: string }> {
+    const startTime = Date.now()
+    const basePrompt = ctx?.systemPrompt?.trim() || this.config.systemPrompt || REPLY_SYSTEM_PROMPT
+
+    const sections = [
+      ctx?.knowledgeSection || '',
+      ctx?.customerSection || '',
+      ctx?.imageContext
+        ? `\n\n## 对方刚发来的图片内容（AI 已点开大图读取，请结合图片内容理解并回复）\n${ctx.imageContext}`
+        : '',
+      buildMemorySection(ctx?.memoryCards)
+    ]
+      .filter((section) => section.trim().length > 0)
+      .join('\n')
+
+    const smartPrompt = `${basePrompt}\n${sections}
+
+## 输出格式（必须严格遵守）
+以 JSON 格式输出，不要输出任何其他内容：
+{"contact": "当前对话的联系人名称", "reply": "你的回复内容", "summary": "本轮对话一句话摘要"}
+- contact：从截图顶部（对话窗口标题栏 / 联系人名称区域，通常在消息区上方）识别当前对话的联系人名称（昵称或备注名）；无法识别时填 null
+- reply：你的回复；如果按规则不需要回复，填 null（等价于 [SKIP]）
+- summary：本轮对话的一句话摘要（客户说了什么、你如何处理），用于客户长期记忆；reply 为 null 时也尽量填写，实在无法判断可填 null`
+
+    try {
+      console.log('[AIClient] getSmartReply 开始...')
+      const raw = await this.callVision(
+        smartPrompt,
+        '请根据截图中微信聊天窗口的最新消息，按输出格式要求返回 JSON。',
+        screenshotBase64
+      )
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
+      console.log(`[AIClient] getSmartReply 完成 (${elapsed}s):`, raw.slice(0, 160))
+
+      const parsed = parseSmartReply(raw)
+      if (parsed) return parsed
+
+      // 降级：模型没按 JSON 输出（旧模型）→ 按旧格式解析
+      if (!raw || raw.trim() === '[SKIP]') {
+        return { contact: null, reply: null }
+      }
+      return { contact: null, reply: raw.trim() }
+    } catch (error: any) {
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
+      console.error(`[AIClient] 智能回复失败 (${elapsed}s):`, error?.message || error)
+      throw error
     }
   }
 
@@ -194,7 +278,7 @@ export class AIClient {
       if (!response.ok) {
         const errorText = await response.text()
         console.error(`[AIClient] API 错误: ${response.status}`, errorText)
-        throw new Error(`API request failed: ${response.status} - ${errorText.slice(0, 200)}`)
+        throw new Error(buildApiErrorMessage(response.status, errorText, this.config.baseURL))
       }
 
       const json = await response.json()
@@ -230,5 +314,58 @@ export class AIClient {
   private stripBase64Prefix(base64: string): string {
     const idx = base64.indexOf('base64,')
     return idx !== -1 ? base64.slice(idx + 'base64,'.length) : base64
+  }
+}
+
+/**
+ * 构造 API 错误消息；401/403 时根据端点类型附加可操作的诊断提示。
+ */
+export function buildApiErrorMessage(
+  status: number,
+  errorText: string,
+  baseURL: string
+): string {
+  let message = `API request failed: ${status} - ${errorText.slice(0, 200)}`
+  if (status === 401 || status === 403) {
+    const base = (baseURL || '').trim()
+    if (base.includes('/api/plan/')) {
+      message +=
+        '。提示：这是 Agent Plan 专属端点，需要使用其专属 API Key（方舟控制台 → 开通管理 → Agent Plan → API Key 管理 创建），普通 ark-xxx 密钥无法通过鉴权。'
+    } else if (base.includes('/api/coding/')) {
+      message +=
+        '。提示：这是 Coding Plan 专属端点，需要使用 Coding Plan 专属 API Key；如无订阅请改用标准 /api/v3 端点。'
+    } else {
+      message += '。提示：请检查 API Key 是否正确、是否与所选服务商匹配。'
+    }
+  }
+  return message
+}
+
+/**
+ * 解析 getSmartReply 的 JSON 输出。
+ * 容错处理：去掉 markdown 代码围栏、提取第一个 {...} 块。
+ */export function parseSmartReply(
+  raw: string
+): { contact: string | null; reply: string | null; summary?: string } | null {
+  if (!raw || typeof raw !== 'string') return null
+  const text = raw.trim()
+  if (text === '[SKIP]') return { contact: null, reply: null }
+
+  const withoutFence = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '')
+  const match = withoutFence.match(/\{[\s\S]*\}/)
+  if (!match) return null
+
+  try {
+    const obj = JSON.parse(match[0])
+    if (!obj || typeof obj !== 'object') return null
+
+    const contact =
+      typeof obj.contact === 'string' && obj.contact.trim() ? obj.contact.trim() : null
+    const reply = typeof obj.reply === 'string' && obj.reply.trim() ? obj.reply.trim() : null
+    const summary =
+      typeof obj.summary === 'string' && obj.summary.trim() ? obj.summary.trim() : undefined
+    return { contact, reply, summary }
+  } catch {
+    return null
   }
 }
