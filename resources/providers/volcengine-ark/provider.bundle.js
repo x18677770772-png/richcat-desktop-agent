@@ -34,19 +34,31 @@ export function createProvider(context) {
       }
 
       const memorySection = buildMemorySection(input.memoryCards)
+      const knowledgeSection = input.knowledgeSection || ''
+      const hasPersona = Boolean(input.personaPrompt && input.personaPrompt.trim())
+      const loadedParts = []
+      if (Array.isArray(input.memoryCards) && input.memoryCards.length > 0) {
+        loadedParts.push(`${input.memoryCards.length} 条团队经验`)
+      }
+      if (knowledgeSection) loadedParts.push('知识库')
+      if (hasPersona) loadedParts.push('角色设定')
       yield {
         type: 'thinking',
-        content: memorySection
-          ? `正在分析聊天内容（已加载 ${input.memoryCards.length} 条团队经验）...`
+        content: loadedParts.length
+          ? `正在分析聊天内容（已加载 ${loadedParts.join('、')}）...`
           : '正在分析聊天内容...'
       }
 
       try {
+        // 角色 prompt 优先（人设系统），否则用配置/默认提示词
+        const basePrompt = hasPersona
+          ? input.personaPrompt
+          : providerConfig.systemPrompt || DEFAULT_PROMPT
         const reply = await requestReply({
           screenshot: input.screenshot,
           apiKey,
           model: providerConfig.model || DEFAULT_MODEL,
-          systemPrompt: (providerConfig.systemPrompt || DEFAULT_PROMPT) + memorySection
+          systemPrompt: `${basePrompt}\n${knowledgeSection}${memorySection}`
         })
 
         if (!reply || reply.trim() === '[SKIP]') {

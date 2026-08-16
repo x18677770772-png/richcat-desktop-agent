@@ -1,8 +1,8 @@
-<a name="readme-top"></a>
+﻿<a name="readme-top"></a>
 
 <div align="center">
 
-<h1>SightFlow · The Open-Source Working Memory Engine</h1>
+<h1>财听猫 · The Open-Source Working Memory Engine</h1>
 
 <p><strong>Bring AI into the real software world — read the screen, get the job done, and accumulate on-the-job experience.</strong></p>
 
@@ -14,18 +14,18 @@
 
 <p>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache 2.0" /></a>
-  <a href="https://github.com/sightflow-dev/sightflow-desktop-agent/stargazers"><img src="https://img.shields.io/github/stars/sightflow-dev/sightflow-desktop-agent?logo=github&label=Stars" alt="GitHub Stars" /></a>
-  <a href="https://github.com/sightflow-dev/sightflow-desktop-agent/network/members"><img src="https://img.shields.io/github/forks/sightflow-dev/sightflow-desktop-agent?logo=github&label=Forks" alt="GitHub Forks" /></a>
+  <a href="https://github.com/x18677770772-png/richcat-desktop-agent/stargazers"><img src="https://img.shields.io/github/stars/x18677770772-png/richcat-desktop-agent?logo=github&label=Stars" alt="GitHub Stars" /></a>
+  <a href="https://github.com/x18677770772-png/richcat-desktop-agent/network/members"><img src="https://img.shields.io/github/forks/x18677770772-png/richcat-desktop-agent?logo=github&label=Forks" alt="GitHub Forks" /></a>
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-success" alt="Platform: Windows | macOS" />
   <a href="https://discord.com/invite/8H6KpbXq3t"><img src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white" alt="Join Discord" /></a>
-  <a href="https://sightflow.dev"><img src="https://img.shields.io/badge/Website-sightflow.dev-0A66C2" alt="Website" /></a>
+  <a href="https://github.com/x18677770772-png/richcat-desktop-agent"><img src="https://img.shields.io/badge/GitHub-RichCat-181717" alt="Website" /></a>
 </p>
 
 <p>
   <a href="#-getting-started"><b>Get Started</b></a> ·
   <a href="#-how-it-works--see--think--do--learn"><b>How It Works</b></a> ·
   <a href="#-configuration"><b>Configuration</b></a> ·
-  <a href="https://sightflow.dev"><b>Website</b></a>
+  <a href="https://github.com/x18677770772-png/richcat-desktop-agent"><b>Website</b></a>
 </p>
 
 </div>
@@ -34,7 +34,7 @@
 
 ## Overview
 
-> **SightFlow does not replace the LLM. It completes the one layer the LLM cannot reach** — turning screen pixels into structured semantics, and task intent into real operations.
+> **财听猫 does not replace the LLM. It completes the one layer the LLM cannot reach** — turning screen pixels into structured semantics, and task intent into real operations.
 
 <div align="center">
   <video src="https://github.com/user-attachments/assets/fdceada5-940b-45d1-bf96-2d26df651809" width="100%" controls></video>
@@ -46,7 +46,7 @@ An enterprise's heaviest work does not live inside an LLM API. It lives **on the
 - **Long horizons** — read → judge → act → follow up → recover. It is never one button click.
 - **Tacit experience** — the real know-how lives in every judgment a senior operator makes, not in any document.
 
-Large language models solved *thinking* and *speaking*. They have **not** yet solved *learning the job* and *doing it well*. SightFlow is the desktop runtime that closes that gap — an agent that **sees** any interface, **thinks** in context, **acts** like a human operator, and **learns** from every execution.
+Large language models solved *thinking* and *speaking*. They have **not** yet solved *learning the job* and *doing it well*. 财听猫 is the desktop runtime that closes that gap — an agent that **sees** any interface, **thinks** in context, **acts** like a human operator, and **learns** from every execution.
 
 ---
 
@@ -93,7 +93,7 @@ Continuously written and replayable step by step, the runtime offers **three cap
 | 📊 **Eval** | Swap models or versions and compare outcomes consistently. |
 | 🧬 **Inherit** | The judgment behind a task is captured once and reused, instead of living only in someone's head. |
 
-> Others record **the steps**. SightFlow records **why each step was taken**. That is the leap from **RPA** to a true **Agent Runtime**.
+> Others record **the steps**. 财听猫 records **why each step was taken**. That is the leap from **RPA** to a true **Agent Runtime**.
 
 Built for real-world, sensitive environments:
 
@@ -105,17 +105,23 @@ Built for real-world, sensitive environments:
 
 ## ✦ Core Capabilities
 
-From WeChat and WeCom to **any desktop software**, SightFlow lets AI work where there is **no API**.
+From WeChat and WeCom to **any desktop software**, 财听猫 lets AI work where there is **no API**.
 
-- **Universal Vision-Based RPA** — No fragile webhooks or private protocols. SightFlow behaves like a human user: reading chat bubbles, manipulating inputs, and navigating native UIs through abstract visual recognition.
+- **Universal Vision-Based RPA** — No fragile webhooks or private protocols. 财听猫 behaves like a human user: reading chat bubbles, manipulating inputs, and navigating native UIs through abstract visual recognition.
 - **State-of-the-Art Vision** — A unified vision layer extracts unread notification dots, message lists, and chat-bubble text in real time across complex, dynamic layouts.
 - **Agentic Workspaces** — Turn unstructured chat requests into actionable node-workflows and API calls, fully programmable via local AI.
+- **AI Customer-Service Workbench** — Turn 财听猫 into a full AI customer-service agent with four built-in capabilities:
+  - 🎭 **Personas** — switch between ready-made roles (medical expert, butler, sports coach, psychologist, sales consultant) or define your own; the persona drives the reply's system prompt.
+  - 📚 **Knowledge Base** — maintain Q&A entries (single or batch import); enabled entries are injected into every reply so answers follow your business facts.
+  - 🧠 **Per-Customer Long-Term Memory** — each contact gets an auto-created profile; every conversation is summarized and remembered, and the history is injected back into the next reply.
+  - 🏷 **Customer Tags & Categories** — tag, categorize, and annotate customers (VIP / prospect / agent …) with stats and tag filters, all stored locally.
+  - 🧩 **Multi-Provider Chat Models** — the built-in chat provider accepts any OpenAI-compatible endpoint: pick a preset (Doubao, GPT-4o, GLM-4V, Qwen-VL) or enter your own Base URL / model / API key.
 
 ---
 
 ## 🚀 Getting Started
 
-SightFlow Desktop Agent is a cross-platform client built on **Electron · electron-vite · React · TypeScript**, driven by a Vision-Language Model (VLM).
+财听猫 Desktop Agent is a cross-platform client built on **Electron · electron-vite · React · TypeScript**, driven by a Vision-Language Model (VLM).
 
 **Prerequisites:** Node.js (LTS) and npm.
 
@@ -166,7 +172,7 @@ Desktop configuration has two layers:
 
 | Main | Base Configuration | Agent / Provider |
 | :--: | :--: | :--: |
-| <img width="240" alt="SightFlow main window" src="./docs/images/main.png" /> | <img width="360" alt="SightFlow base configuration" src="./docs/images/settings-base.png" /> | <img width="360" alt="SightFlow agent configuration" src="./docs/images/settings-provider.png" /> |
+| <img width="240" alt="财听猫 main window" src="./docs/images/main.png" /> | <img width="360" alt="财听猫 base configuration" src="./docs/images/settings-base.png" /> | <img width="360" alt="财听猫 agent configuration" src="./docs/images/settings-provider.png" /> |
 
 ### Target applications & selection mode
 
@@ -181,9 +187,9 @@ The main window offers a **Target Application** shortcut that decides how the de
 
 ### Provider Hub
 
-SightFlow abstracts "analyze a screenshot and generate a reply" into an independent **Provider**. A provider declares its config schema via `manifest.json` and, through its bundle entry, receives a chat screenshot and returns `reply_text`, `skip`, and `error` events.
+财听猫 abstracts "analyze a screenshot and generate a reply" into an independent **Provider**. A provider declares its config schema via `manifest.json` and, through its bundle entry, receives a chat screenshot and returns `reply_text`, `skip`, and `error` events.
 
-- The candidate list is fetched by default from `https://sightflow.dev/provider-hub.json`.
+- The candidate list is fetched by default from `https://github.com/x18677770772-png/richcat-desktop-agent/provider-hub.json`.
 - The hub only tracks each provider's `manifestUrl`; UI fields come from each provider's manifest.
 - Results are cached locally after first load; the local cache is preferred unless you refresh via the button next to the Agent title.
 - **Doubao Seed** is always retained locally as the default provider, so there is always an option if the remote list is unavailable.
@@ -201,7 +207,7 @@ resources/providers/volcengine-ark/provider.bundle.js
 
 ## 🔐 Security & Data Ownership
 
-SightFlow's work traces are stored **locally by default** — never uploaded to any server, never included in any public training dataset. Open-source code does **not** mean open data: **your work data always belongs to you.**
+财听猫's work traces are stored **locally by default** — never uploaded to any server, never included in any public training dataset. Open-source code does **not** mean open data: **your work data always belongs to you.**
 
 ---
 
@@ -210,7 +216,7 @@ SightFlow's work traces are stored **locally by default** — never uploaded to 
 We believe **Agent Computer-Use will be foundational infrastructure for the next decade of AI**. If you want to help build it, come join us.
 
 - 💬 **[Join our Discord](https://discord.com/invite/8H6KpbXq3t)** — co-build with the community.
-- ⭐ **[Star the repo](https://github.com/sightflow-dev/sightflow-desktop-agent)** — it genuinely helps.
+- ⭐ **[Star the repo](https://github.com/x18677770772-png/richcat-desktop-agent)** — it genuinely helps.
 - 🛠 **Contribute** — issues and pull requests are welcome.
 
 ---
@@ -223,10 +229,10 @@ Released under the [Apache License 2.0](LICENSE).
 
 ## 📬 Contact
 
-- 🌐 **Website:** [sightflow.dev](https://sightflow.dev)
-- ✉️ **Email:** [builder@sightflow.dev](mailto:builder@sightflow.dev)
+- 🌐 **GitHub:** https://github.com/x18677770772-png/richcat-desktop-agent
+
 - 💬 **Discord:** [Join the server](https://discord.com/invite/8H6KpbXq3t)
 
-<div align="center"><sub>© 2026 SightFlow. Released under the Apache License 2.0.</sub></div>
+<div align="center"><sub>© 2026 财听猫. Released under the Apache License 2.0.</sub></div>
 
 <p align="right"><a href="#readme-top">↑ Back to top</a></p>

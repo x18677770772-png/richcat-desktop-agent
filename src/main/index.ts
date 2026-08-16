@@ -1,10 +1,12 @@
 import { app, shell, BrowserWindow, ipcMain, desktopCapturer } from 'electron'
 import { join } from 'path'
+import * as fs from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { checkAndRequestPermissions } from './permission'
 import Store from 'electron-store'
-import { AIClient } from '../core/ai-client'
+import { AIClient, buildKnowledgeSection } from '../core/ai-client'
+import { LocalProvider } from '../core/local-provider'
 import { DesktopDevice } from '../core/device'
 import { RPADevice } from '../core/rpa-device'
 import { BoxSelectDevice } from '../core/box-select-device'
@@ -22,7 +24,6 @@ import {
   getInstalledProviderManifest,
   installProviderFromUrl,
   InstalledProviderInfo,
-  loadBuiltinDoubaoProvider,
   loadInstalledProvider
 } from './provider-bundle'
 import {
@@ -39,9 +40,33 @@ import {
   TraceRecorder
 } from '../core/trace/trace-recorder'
 import { TraceStepInput } from '../core/trace/trace-types'
+import { ProviderAdapter } from '../core/session-types'
 import { ExperienceStore, NewExperienceCard } from '../core/memory/experience-store'
 import { induceCardsFromSession } from '../core/memory/learn-from-session'
+import { PersonaStore, NewPersona } from '../core/persona/persona-store'
+import { KnowledgeStore, NewKnowledgeItem } from '../core/knowledge/knowledge-store'
+import { CustomerStore, CustomerPatch } from '../core/customers/customer-store'
 const StoreClass = typeof Store === 'function' ? Store : ((Store as any).default as typeof Store)
+
+// ── 品牌升级：SightFlow → 财听猫 RichCat ──
+// 应用改名后 userData 目录（%APPDATA%/RichCat）与旧目录（%APPDATA%/sightflow-desktop-agent）
+// 不再相同。首次启动时把旧目录里的 settings / 客户档案 / 知识库 / 角色 / 轨迹等
+// 整体迁移到新目录，避免用户数据丢失。只迁移一次（新目录不存在时）。
+// 注意：app.getPath('userData') 被调用时 Electron 会立即创建该目录（含 app name 子路径），
+// 因此必须先按 appData + app.getName() 推算新目录名，再判断“新目录是否已存在”，
+// 否则 existsSync 恒为 true，迁移永远不会执行。
+const OLD_USER_DATA_DIR = join(app.getPath('appData'), 'sightflow-desktop-agent')
+const NEW_USER_DATA_DIR = join(app.getPath('appData'), app.getName())
+if (OLD_USER_DATA_DIR !== NEW_USER_DATA_DIR) {
+  try {
+    if (fs.existsSync(OLD_USER_DATA_DIR) && !fs.existsSync(NEW_USER_DATA_DIR)) {
+      fs.cpSync(OLD_USER_DATA_DIR, NEW_USER_DATA_DIR, { recursive: true })
+      console.log('[RichCat] 已从旧数据目录迁移用户数据:', OLD_USER_DATA_DIR, '→', NEW_USER_DATA_DIR)
+    }
+  } catch (error) {
+    console.error('[RichCat] 用户数据迁移失败（不影响启动，后续可手动复制）:', error)
+  }
+}
 
 const FIXED_ARK_MODEL = 'doubao-seed-2-0-lite-260215'
 const FIXED_ARK_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
@@ -56,6 +81,10 @@ interface AppSettings {
   appType: AppType
   vision: {
     apiKey: string
+    /** 视觉模型 Base URL（OpenAI 兼容端点）；留空用默认方舟 /api/v3 */
+    baseURL?: string
+    /** 视觉模型名；留空用默认 doubao-seed */
+    model?: string
   }
   chatProvider: {
     manifestUrl: string
@@ -124,7 +153,7 @@ const settingsStore = new StoreClass({
   defaults: {
     locale: 'zh',
     appType: 'wechat',
-    vision: { apiKey: '' },
+    vision: { apiKey: '', baseURL: '', model: '' },
     chatProvider: {
       manifestUrl: '',
       installed: null,
@@ -137,12 +166,20 @@ const settingsStore = new StoreClass({
 
 let runtime: RuntimeHost<ReturnType<typeof createInitialGenericChannelState>> | null = null
 let runtimeDevice: DesktopDevice | null = null
+let runtimeProvider: ProviderAdapter | null = null
 let settingsWindow: BrowserWindow | null = null
 let memoryWindow: BrowserWindow | null = null
+let knowledgeWindow: BrowserWindow | null = null
+let customerWindow: BrowserWindow | null = null
 
 // ── 工作记忆（work-trace + 经验卡片）单例，首次使用时初始化 ──
 let traceRecorderInstance: TraceRecorder | null = null
 let experienceStoreInstance: ExperienceStore | null = null
+
+// ── AI 客服工作台（角色 / 知识库 / 客户档案）单例 ──
+let personaStoreInstance: PersonaStore | null = null
+let knowledgeStoreInstance: KnowledgeStore | null = null
+let customerStoreInstance: CustomerStore | null = null
 
 function worktraceBaseDir(): string {
   return join(app.getPath('userData'), 'worktrace')
@@ -160,6 +197,29 @@ function getExperienceStore(): ExperienceStore {
     experienceStoreInstance = new ExperienceStore(join(worktraceBaseDir(), 'memory', 'cards.json'))
   }
   return experienceStoreInstance
+}
+
+function getPersonaStore(): PersonaStore {
+  if (!personaStoreInstance) {
+    personaStoreInstance = new PersonaStore(join(worktraceBaseDir(), 'memory', 'personas.json'))
+  }
+  return personaStoreInstance
+}
+
+function getKnowledgeStore(): KnowledgeStore {
+  if (!knowledgeStoreInstance) {
+    knowledgeStoreInstance = new KnowledgeStore(join(worktraceBaseDir(), 'memory', 'knowledge.json'))
+  }
+  return knowledgeStoreInstance
+}
+
+function getCustomerStore(): CustomerStore {
+  if (!customerStoreInstance) {
+    customerStoreInstance = new CustomerStore(
+      join(worktraceBaseDir(), 'customers', 'customers.json')
+    )
+  }
+  return customerStoreInstance
 }
 
 function createWindow(): void {
@@ -287,6 +347,98 @@ function createMemoryWindow(): void {
   } else {
     memoryWindow.loadFile(join(__dirname, '../renderer/index.html'), {
       query: { window: 'memory' }
+    })
+  }
+}
+
+function createKnowledgeWindow(): void {
+  if (knowledgeWindow && !knowledgeWindow.isDestroyed()) {
+    knowledgeWindow.show()
+    knowledgeWindow.focus()
+    return
+  }
+
+  knowledgeWindow = new BrowserWindow({
+    width: 980,
+    height: 720,
+    minWidth: 820,
+    minHeight: 560,
+    show: false,
+    autoHideMenuBar: true,
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 14, y: 14 },
+    backgroundColor: '#0a0b10',
+    ...(process.platform === 'linux' ? { icon } : {}),
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false
+    }
+  })
+
+  knowledgeWindow.on('ready-to-show', () => {
+    knowledgeWindow?.show()
+  })
+
+  knowledgeWindow.on('closed', () => {
+    knowledgeWindow = null
+  })
+
+  knowledgeWindow.webContents.setWindowOpenHandler((details) => {
+    shell.openExternal(details.url)
+    return { action: 'deny' }
+  })
+
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    knowledgeWindow.loadURL(`${process.env['ELECTRON_RENDERER_URL']}?window=knowledge`)
+  } else {
+    knowledgeWindow.loadFile(join(__dirname, '../renderer/index.html'), {
+      query: { window: 'knowledge' }
+    })
+  }
+}
+
+function createCustomerWindow(): void {
+  if (customerWindow && !customerWindow.isDestroyed()) {
+    customerWindow.show()
+    customerWindow.focus()
+    return
+  }
+
+  customerWindow = new BrowserWindow({
+    width: 1080,
+    height: 760,
+    minWidth: 920,
+    minHeight: 600,
+    show: false,
+    autoHideMenuBar: true,
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 14, y: 14 },
+    backgroundColor: '#0a0b10',
+    ...(process.platform === 'linux' ? { icon } : {}),
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false
+    }
+  })
+
+  customerWindow.on('ready-to-show', () => {
+    customerWindow?.show()
+  })
+
+  customerWindow.on('closed', () => {
+    customerWindow = null
+  })
+
+  customerWindow.webContents.setWindowOpenHandler((details) => {
+    shell.openExternal(details.url)
+    return { action: 'deny' }
+  })
+
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    customerWindow.loadURL(`${process.env['ELECTRON_RENDERER_URL']}?window=customer`)
+  } else {
+    customerWindow.loadFile(join(__dirname, '../renderer/index.html'), {
+      query: { window: 'customer' }
     })
   }
 }
@@ -431,7 +583,7 @@ async function fetchProviderHub(url = DEFAULT_PROVIDER_HUB_URL): Promise<Provide
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(async () => {
   // Set app user model id for windows
-  electronApp.setAppUserModelId('com.electron')
+  electronApp.setAppUserModelId('com.richcat.desktop')
 
   // 检查和请求 macOS 需要的权限
   await checkAndRequestPermissions()
@@ -589,8 +741,8 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('memory:learnFromSession', async (_event, sessionId: string) => {
     try {
-      const apiKey = normalizeSettings(settingsStore.store).vision.apiKey
-      if (!apiKey) {
+      const vision = resolveVisionConfig(normalizeSettings(settingsStore.store))
+      if (!vision.apiKey) {
         return { success: false, error: '请先在设置中填写视觉接口密钥' }
       }
       const data = await readTraceSession(worktraceBaseDir(), sessionId)
@@ -599,9 +751,9 @@ app.whenReady().then(async () => {
       }
 
       const client = new AIClient({
-        apiKey,
-        model: FIXED_ARK_MODEL,
-        baseURL: FIXED_ARK_BASE_URL
+        apiKey: vision.apiKey,
+        model: vision.model || FIXED_ARK_MODEL,
+        baseURL: vision.baseURL || FIXED_ARK_BASE_URL
       })
       const induced = await induceCardsFromSession(client, data.session, data.steps)
       if (induced.length === 0) {
@@ -649,6 +801,125 @@ app.whenReady().then(async () => {
     return { success: getExperienceStore().setEnabled(cardId, enabled === true) }
   })
 
+  // ── 角色设定（Persona） ──
+  ipcMain.handle('persona:list', async () => {
+    return getPersonaStore().listPersonas()
+  })
+
+  ipcMain.handle('persona:getActive', async () => {
+    return getPersonaStore().getActivePersona()
+  })
+
+  ipcMain.handle('persona:setActive', async (_event, personaId: string | null) => {
+    const ok = getPersonaStore().setActivePersona(personaId === null ? null : String(personaId))
+    return { success: ok }
+  })
+
+  ipcMain.handle('persona:add', async (_event, input: NewPersona) => {
+    try {
+      const persona = getPersonaStore().addPersona(input)
+      return { success: true, persona }
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('persona:update', async (_event, personaId: string, patch) => {
+    const ok = getPersonaStore().updatePersona(String(personaId), patch)
+    return { success: ok }
+  })
+
+  ipcMain.handle('persona:delete', async (_event, personaId: string) => {
+    return { success: getPersonaStore().deletePersona(String(personaId)) }
+  })
+
+  // ── 知识库 ──
+  ipcMain.handle('knowledge:list', async () => {
+    return getKnowledgeStore().listItems()
+  })
+
+  ipcMain.handle('knowledge:search', async (_event, query: string) => {
+    return getKnowledgeStore().search(typeof query === 'string' ? query : '')
+  })
+
+  ipcMain.handle('knowledge:add', async (_event, input: NewKnowledgeItem) => {
+    try {
+      const item = getKnowledgeStore().addItem(input)
+      return { success: true, item }
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('knowledge:update', async (_event, itemId: string, patch) => {
+    const ok = getKnowledgeStore().updateItem(String(itemId), patch)
+    return { success: ok }
+  })
+
+  ipcMain.handle('knowledge:delete', async (_event, itemId: string) => {
+    return { success: getKnowledgeStore().deleteItem(String(itemId)) }
+  })
+
+  ipcMain.handle('knowledge:setEnabled', async (_event, itemId: string, enabled: boolean) => {
+    return { success: getKnowledgeStore().setEnabled(String(itemId), enabled === true) }
+  })
+
+  ipcMain.handle('knowledge:importText', async (_event, text: string) => {
+    if (typeof text !== 'string' || !text.trim()) {
+      return { success: false, error: '导入内容不能为空' }
+    }
+    // 按「标题：内容」或「标题\n内容」分块导入
+    const created = getKnowledgeStore().importItems(parseKnowledgeImportText(text))
+    return { success: created.length > 0, items: created }
+  })
+
+  // ── 客户档案（CRM） ──
+  ipcMain.handle('customer:list', async () => {
+    return getCustomerStore().listCustomers()
+  })
+
+  ipcMain.handle('customer:update', async (_event, customerId: string, patch: CustomerPatch) => {
+    return { success: getCustomerStore().updateCustomer(String(customerId), patch) }
+  })
+
+  ipcMain.handle('customer:delete', async (_event, customerId: string) => {
+    return { success: getCustomerStore().deleteCustomer(String(customerId)) }
+  })
+
+  ipcMain.handle('customer:addTags', async (_event, customerId: string, tags: string[]) => {
+    return { success: getCustomerStore().addTags(String(customerId), Array.isArray(tags) ? tags : []) }
+  })
+
+  ipcMain.handle('customer:removeTag', async (_event, customerId: string, tag: string) => {
+    return { success: getCustomerStore().removeTag(String(customerId), String(tag)) }
+  })
+
+  ipcMain.handle('customer:setCategory', async (_event, customerId: string, category: string) => {
+    return { success: getCustomerStore().setCategory(String(customerId), String(category)) }
+  })
+
+  ipcMain.handle('customer:getStats', async () => {
+    return getCustomerStore().getStats()
+  })
+
+  ipcMain.handle('customer:listTags', async () => {
+    return getCustomerStore().listAllTags()
+  })
+
+  ipcMain.handle('customer:listCategories', async () => {
+    return getCustomerStore().listAllCategories()
+  })
+
+  ipcMain.handle('knowledge:open', async () => {
+    createKnowledgeWindow()
+    return { success: true }
+  })
+
+  ipcMain.handle('customer:open', async () => {
+    createCustomerWindow()
+    return { success: true }
+  })
+
   // ── Runtime / Session IPC（沿用 legacy engine:* 通道名） ──
   ipcMain.handle('engine:start', async (_event, config) => {
     const result = await startEngineCore(config)
@@ -669,9 +940,18 @@ app.whenReady().then(async () => {
   ipcMain.handle('engine:updateConfig', async (_event, config) => {
     const settings = normalizeSettings(config || settingsStore.store)
     if (runtimeDevice) {
-      // setApiKey 在 BoxSelectDevice 上是 no-op，对 RPADevice 才生效。
+      // setVisionConfig 在 BoxSelectDevice 上是 no-op，对 RPADevice 才生效。
+      runtimeDevice.setVisionConfig?.(resolveVisionConfig(settings))
       runtimeDevice.setApiKey(settings.vision.apiKey)
       runtimeDevice.setAppType(settings.appType)
+    }
+    if (runtimeProvider instanceof LocalProvider) {
+      runtimeProvider.updateConfig({
+        apiKey: settings.chatProvider.config?.apiKey || settings.vision.apiKey,
+        model: settings.chatProvider.config?.model || FIXED_ARK_MODEL,
+        baseURL: settings.chatProvider.config?.baseURL || FIXED_ARK_BASE_URL,
+        systemPrompt: settings.chatProvider.config?.systemPrompt || undefined
+      })
     }
     if (runtime) {
       runtime.updateAppType(settings.appType)
@@ -680,11 +960,12 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('engine:testConnection', async (_event, config) => {
-    const apiKey = config?.apiKey || normalizeSettings(settingsStore.store).vision.apiKey
+    const settings = normalizeSettings(settingsStore.store)
+    const vision = resolveVisionConfig(settings)
     const client = new AIClient({
-      apiKey,
-      model: FIXED_ARK_MODEL,
-      baseURL: FIXED_ARK_BASE_URL
+      apiKey: config?.apiKey || vision.apiKey,
+      model: config?.model || vision.model || FIXED_ARK_MODEL,
+      baseURL: config?.baseURL || vision.baseURL || FIXED_ARK_BASE_URL
     })
     return client.testConnection()
   })
@@ -804,23 +1085,47 @@ async function startEngineCore(rawConfig?: any): Promise<SkillStartResult> {
     const settings = normalizeSettings(rawConfig || settingsStore.store)
     const appType: AppType = settings.appType || 'wechat'
     const startupStrategy = resolveSettingsStrategy(appType, settings)
+    const hasChatKey = Boolean(settings.chatProvider.config?.apiKey?.trim())
     const providerNeedsVisionKey =
       !settings.chatProvider.installed ||
       settings.chatProvider.installed.id === BUILTIN_DOUBAO_PROVIDER_ID
-    const needsVisionKey = startupStrategy === 'vlm' || providerNeedsVisionKey
+    // VLM 布局检测始终需要视觉密钥；聊天 key 独立配置时不再强制视觉密钥
+    const needsVisionKey = startupStrategy === 'vlm' || (providerNeedsVisionKey && !hasChatKey)
 
     if (needsVisionKey && !settings.vision.apiKey) {
       return { ok: false, reason: 'no_vision_key', message: '请先填写视觉接口密钥' }
     }
 
-    // 没有自定义 provider → 走内置 doubao，使用视觉密钥
+    // 没有自定义 provider → 走内置本地智能 provider（支持角色 / 知识库 / 客户记忆）
     let provider
     if (!settings.chatProvider.installed) {
-      const loaded = await loadBuiltinDoubaoProvider({
-        ...settings.chatProvider.config,
-        apiKey: settings.vision.apiKey
+      provider = new LocalProvider({
+        ai: {
+          apiKey: settings.chatProvider.config?.apiKey || settings.vision.apiKey,
+          model: settings.chatProvider.config?.model || FIXED_ARK_MODEL,
+          baseURL: settings.chatProvider.config?.baseURL || FIXED_ARK_BASE_URL,
+          systemPrompt: settings.chatProvider.config?.systemPrompt || undefined
+        },
+        context: {
+          getPersonaPrompt: () => getPersonaStore().getActivePersona()?.systemPrompt ?? null,
+          getKnowledgeSection: () => buildKnowledgeSection(getKnowledgeStore().getInjectionItems()),
+          getCustomerSection: (contact: string) => {
+            const customer = getCustomerStore().getCustomerByName(contact)
+            return customer ? getCustomerStore().buildMemorySection(customer) : ''
+          },
+          recordCustomerMemory: (contact: string, summary: string, reply: string | null) => {
+            try {
+              const customer = getCustomerStore().getOrCreateCustomer(contact)
+              getCustomerStore().appendMemory(customer.customerId, {
+                summary,
+                lastReply: reply ?? undefined
+              })
+            } catch (error) {
+              console.error('[Main] 客户记忆回写失败:', error)
+            }
+          }
+        }
       })
-      provider = loaded.provider
     } else {
       const installedManifest = await getInstalledProviderManifest(settings.chatProvider.installed)
       // doubao（无论是用户主动装的还是内置的）apiKey 由视觉密钥共享提供，不强校验
@@ -858,7 +1163,7 @@ async function startEngineCore(rawConfig?: any): Promise<SkillStartResult> {
     let device: DesktopDevice
     let strategy: CaptureStrategy
     try {
-      const built = await buildDevice(appType, settings, settings.vision.apiKey, log)
+      const built = await buildDevice(appType, settings, resolveVisionConfig(settings), log)
       device = built.device
       strategy = built.strategy
     } catch (err: any) {
@@ -870,6 +1175,7 @@ async function startEngineCore(rawConfig?: any): Promise<SkillStartResult> {
     }
     log('thinking', `已选用抓取策略：${strategy}`)
     runtimeDevice = device
+    runtimeProvider = provider
 
     // ── 工作记忆：本次执行的所有步骤落成 work-trace 会话 ──
     const recorder = getTraceRecorder()
@@ -907,6 +1213,8 @@ async function startEngineCore(rawConfig?: any): Promise<SkillStartResult> {
       onLog: log,
       onTrace,
       getMemoryCards: () => getExperienceStore().getActiveCardBriefs(),
+      getPersonaPrompt: () => getPersonaStore().getActivePersona()?.systemPrompt ?? null,
+      getKnowledgeSection: () => buildKnowledgeSection(getKnowledgeStore().getInjectionItems()),
       onSessionEnd: () => recorder.endSession()
     })
 
@@ -932,6 +1240,7 @@ async function stopEngineCore(stopReason: string): Promise<SkillPauseResult> {
   }
   try {
     await runtime.stopSession(stopReason)
+    runtimeProvider = null
     notifyEngineStateChanged('idle')
     return { ok: true }
   } catch (error: any) {
@@ -991,7 +1300,7 @@ function resolveSettingsStrategy(appType: AppType, settings: AppSettings): Captu
 async function buildDevice(
   appType: AppType,
   settings: AppSettings,
-  apiKey: string,
+  vision: { apiKey: string; baseURL?: string; model?: string },
   log: (type: 'thinking' | 'reply' | 'skip' | 'error', content: string) => void
 ): Promise<{ device: DesktopDevice; strategy: CaptureStrategy }> {
   const perApp = settings.capture[appType] ?? { strategy: 'auto' as CaptureStrategy, regions: null }
@@ -1000,7 +1309,7 @@ async function buildDevice(
   if (effective === 'vlm') {
     const rpa = new RPADevice()
     rpa.setAppType(appType)
-    rpa.setApiKey(apiKey)
+    rpa.setVisionConfig(vision)
     return { device: rpa, strategy: 'vlm' }
   }
 
@@ -1112,8 +1421,18 @@ function normalizeCapture(raw: unknown): Partial<Record<AppType, PerAppCapture>>
   return out
 }
 
-function normalizeSettings(raw: any): AppSettings {
-  const oldApiKey = typeof raw?.apiKey === 'string' ? raw.apiKey : ''
+/** 解析当前视觉模型配置（含 Agent Plan 等自定义端点）；空值回退默认方舟 */
+function resolveVisionConfig(
+  settings: AppSettings
+): { apiKey: string; baseURL?: string; model?: string } {
+  return {
+    apiKey: settings.vision.apiKey,
+    baseURL: settings.vision.baseURL?.trim() || undefined,
+    model: settings.vision.model?.trim() || undefined
+  }
+}
+
+function normalizeSettings(raw: any): AppSettings {  const oldApiKey = typeof raw?.apiKey === 'string' ? raw.apiKey : ''
   const oldModel = typeof raw?.model === 'string' && raw.model ? raw.model : FIXED_ARK_MODEL
   const oldSystemPrompt = typeof raw?.systemPrompt === 'string' ? raw.systemPrompt : ''
   const rawProviderConfig =
@@ -1136,7 +1455,15 @@ function normalizeSettings(raw: any): AppSettings {
     locale: raw?.locale === 'en' ? 'en' : 'zh',
     appType: coerceAppType(raw?.appType),
     vision: {
-      apiKey: raw?.vision?.apiKey || oldApiKey || ''
+      apiKey: raw?.vision?.apiKey || oldApiKey || '',
+      baseURL:
+        typeof raw?.vision?.baseURL === 'string' && raw.vision.baseURL.trim()
+          ? raw.vision.baseURL.trim()
+          : '',
+      model:
+        typeof raw?.vision?.model === 'string' && raw.vision.model.trim()
+          ? raw.vision.model.trim()
+          : ''
     },
     chatProvider: {
       manifestUrl: raw?.chatProvider?.manifestUrl || raw?.providerManifestUrl || '',
@@ -1159,4 +1486,37 @@ function withSchemaDefaults(
     }
   }
   return next
+}
+
+/**
+ * 把自由文本解析成知识条目（批量导入）。
+ * 规则：按空行分段；每段第一行为标题（含「：」时冒号前为标题），其余为内容。
+ * 例：
+ *   运费政策：满 99 元包邮，偏远地区除外。
+ *
+ *   退货流程
+ *   7 天内无理由退货，联系客服获取退货地址。
+ */
+function parseKnowledgeImportText(text: string): NewKnowledgeItem[] {
+  const sections = text
+    .split(/\n\s*\n/)
+    .map((section) => section.trim())
+    .filter((section) => section.length > 0)
+
+  const items: NewKnowledgeItem[] = []
+  for (const section of sections) {
+    const lines = section.split('\n').map((line) => line.trim())
+    const first = lines[0] || ''
+    const colonIndex = first.indexOf('：')
+    const hasColon = colonIndex > 0 && colonIndex < first.length - 1
+    const title = (hasColon ? first.slice(0, colonIndex) : first).trim()
+    const rest = hasColon ? [first.slice(colonIndex + 1).trim(), ...lines.slice(1)] : lines.slice(1)
+    const content = rest.filter(Boolean).join('\n').trim()
+    if (title && content) {
+      items.push({ title, content, source: 'import' })
+    } else if (title) {
+      items.push({ title, content: title, source: 'import' })
+    }
+  }
+  return items
 }

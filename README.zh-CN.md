@@ -1,8 +1,8 @@
-<a name="readme-top"></a>
+﻿<a name="readme-top"></a>
 
 <div align="center">
 
-<h1>SightFlow · 开源工作记忆引擎</h1>
+<h1>财听猫 · 开源工作记忆引擎</h1>
 
 <p><strong>让 AI 进入真实软件世界 —— 看懂界面，完成任务，沉淀岗位经验。</strong></p>
 
@@ -14,18 +14,18 @@
 
 <p>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache 2.0" /></a>
-  <a href="https://github.com/sightflow-dev/sightflow-desktop-agent/stargazers"><img src="https://img.shields.io/github/stars/sightflow-dev/sightflow-desktop-agent?logo=github&label=Stars" alt="GitHub Stars" /></a>
-  <a href="https://github.com/sightflow-dev/sightflow-desktop-agent/network/members"><img src="https://img.shields.io/github/forks/sightflow-dev/sightflow-desktop-agent?logo=github&label=Forks" alt="GitHub Forks" /></a>
+  <a href="https://github.com/x18677770772-png/richcat-desktop-agent/stargazers"><img src="https://img.shields.io/github/stars/x18677770772-png/richcat-desktop-agent?logo=github&label=Stars" alt="GitHub Stars" /></a>
+  <a href="https://github.com/x18677770772-png/richcat-desktop-agent/network/members"><img src="https://img.shields.io/github/forks/x18677770772-png/richcat-desktop-agent?logo=github&label=Forks" alt="GitHub Forks" /></a>
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-success" alt="Platform: Windows | macOS" />
   <a href="https://discord.com/invite/8H6KpbXq3t"><img src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white" alt="Join Discord" /></a>
-  <a href="https://sightflow.dev"><img src="https://img.shields.io/badge/Website-sightflow.dev-0A66C2" alt="Website" /></a>
+  <a href="https://github.com/x18677770772-png/richcat-desktop-agent"><img src="https://img.shields.io/badge/GitHub-RichCat-181717" alt="Website" /></a>
 </p>
 
 <p>
   <a href="#-快速开始"><b>快速开始</b></a> ·
   <a href="#-工作原理--看--想--做--学"><b>工作原理</b></a> ·
   <a href="#-配置说明"><b>配置说明</b></a> ·
-  <a href="https://sightflow.dev"><b>官网</b></a>
+  <a href="https://github.com/x18677770772-png/richcat-desktop-agent"><b>官网</b></a>
 </p>
 
 </div>
@@ -34,7 +34,7 @@
 
 ## 项目概述
 
-> **SightFlow 不替代 LLM，而是补齐 LLM 无法进入软件世界的关键一层** —— 把屏幕像素解析成结构化语义，再把任务意图转成真实操作。
+> **财听猫 不替代 LLM，而是补齐 LLM 无法进入软件世界的关键一层** —— 把屏幕像素解析成结构化语义，再把任务意图转成真实操作。
 
 <div align="center">
   <video src="https://github.com/user-attachments/assets/fdceada5-940b-45d1-bf96-2d26df651809" width="100%" controls></video>
@@ -46,7 +46,7 @@
 - **流程长** —— 看消息 → 判断 → 执行 → 跟进 → 兜底，不是点一次按钮。
 - **经验隐性** —— 真正的业务经验在老员工每一次判断里，不在文档里。
 
-大模型解决了「想」和「说」，还没解决「学会」和「做好」。SightFlow 正是补齐这一层的桌面运行时 —— 一个能**看懂**任意界面、结合上下文**判断**、像真人一样**执行**、并从每一次操作中**沉淀**经验的 Agent。
+大模型解决了「想」和「说」，还没解决「学会」和「做好」。财听猫 正是补齐这一层的桌面运行时 —— 一个能**看懂**任意界面、结合上下文**判断**、像真人一样**执行**、并从每一次操作中**沉淀**经验的 Agent。
 
 ---
 
@@ -105,17 +105,23 @@ work-trace = {
 
 ## ✦ 核心能力
 
-从微信、企业微信到**任意桌面软件**，SightFlow 让 AI 在**没有 API** 的地方也能工作。
+从微信、企业微信到**任意桌面软件**，财听猫 让 AI 在**没有 API** 的地方也能工作。
 
 - **通用视觉驱动自动化** —— 抛弃脆弱的 Webhook 与私有协议，像真实人类用户一样阅读气泡、操作输入框、浏览原生 UI 界面。
 - **前沿的视觉模型引擎** —— 由统一视觉层驱动，在复杂动态的布局中实时提取红点角标、消息列表、聊天气泡中的文本与语义信息。
 - **智能体工作流工作区** —— 将非结构化的聊天请求瞬间转化为可执行的节点工作流与 API 调用，通过本地 AI 实现全维度可编程化。
+- **AI 客服工作台** —— 把 财听猫 变成完整的 AI 微信客服，内置四大能力：
+  - 🎭 **角色设定** —— 内置医学专家、管家、运动专家、心理专家、销售顾问等角色，也可自定义角色；角色决定回复的人设与风格。
+  - 📚 **知识库** —— 维护问答知识条目（支持单个添加与批量导入），启用的知识会注入每一次回复，让回答始终基于你的业务资料。
+  - 🧠 **客户长期记忆** —— 自动为每个联系人建档，每轮对话生成摘要并记住，下一轮回复自动携带该客户的历史记忆。
+  - 🏷 **客户分类与标签** —— 为客户打标签（VIP、潜在客户、代理…）、设置分类、写备注，支持标签筛选与统计，数据全部保存在本地。
+  - 🧩 **多模型接入** —— 内置聊天 Provider 支持任意 OpenAI 兼容端点：一键选择预设（豆包、GPT-4o、GLM-4V、Qwen-VL）或自定义 Base URL / 模型 / API Key。
 
 ---
 
 ## 🚀 快速开始
 
-SightFlow 桌面端是基于 **Electron · electron-vite · React · TypeScript** 构建的跨平台客户端，由视觉语言模型（VLM）驱动。
+财听猫 桌面端是基于 **Electron · electron-vite · React · TypeScript** 构建的跨平台客户端，由视觉语言模型（VLM）驱动。
 
 **环境要求：** Node.js（LTS）与 npm。
 
@@ -166,7 +172,7 @@ npm run build:linux   # Linux
 
 | 主界面 | 基础配置 | 智能体配置 |
 | :--: | :--: | :--: |
-| <img width="240" alt="SightFlow 主界面" src="./docs/images/main.png" /> | <img width="360" alt="SightFlow 基础配置" src="./docs/images/settings-base.png" /> | <img width="360" alt="SightFlow 智能体配置" src="./docs/images/settings-provider.png" /> |
+| <img width="240" alt="财听猫 主界面" src="./docs/images/main.png" /> | <img width="360" alt="财听猫 基础配置" src="./docs/images/settings-base.png" /> | <img width="360" alt="财听猫 智能体配置" src="./docs/images/settings-provider.png" /> |
 
 ### 目标应用与框选模式
 
@@ -181,9 +187,9 @@ npm run build:linux   # Linux
 
 ### 智能体 / Provider Hub
 
-SightFlow 桌面端把「截图分析并生成回复」的聊天能力抽象为独立 **Provider**。Provider 通过 `manifest.json` 声明配置结构，通过 bundle 入口接收聊天截图并返回 `reply_text`、`skip`、`error` 等事件。
+财听猫 桌面端把「截图分析并生成回复」的聊天能力抽象为独立 **Provider**。Provider 通过 `manifest.json` 声明配置结构，通过 bundle 入口接收聊天截图并返回 `reply_text`、`skip`、`error` 等事件。
 
-- 默认从 `https://sightflow.dev/provider-hub.json` 拉取候选 Provider 列表。
+- 默认从 `https://github.com/x18677770772-png/richcat-desktop-agent/provider-hub.json` 拉取候选 Provider 列表。
 - Hub 只维护 Provider 的 `manifestUrl`，UI 展示字段来自各 Provider 的 manifest。
 - 首次加载后会缓存到本地；除非手动点击智能体标题旁的刷新按钮，否则优先使用本地缓存。
 - 本地始终保留内置 **豆包 Seed** 作为默认 Provider，避免远端列表不可用时没有可选项。
@@ -201,7 +207,7 @@ resources/providers/volcengine-ark/provider.bundle.js
 
 ## 🔐 安全与数据归属
 
-SightFlow 的执行轨迹（work-trace）**默认保存在本地** —— 不会上传到任何服务器，也不会进入任何公共训练数据集。代码开源不代表用户数据开源：**你的工作数据始终属于你。**
+财听猫 的执行轨迹（work-trace）**默认保存在本地** —— 不会上传到任何服务器，也不会进入任何公共训练数据集。代码开源不代表用户数据开源：**你的工作数据始终属于你。**
 
 ---
 
@@ -210,7 +216,7 @@ SightFlow 的执行轨迹（work-trace）**默认保存在本地** —— 不会
 我们相信 **Agent Computer Use 会是未来 10 年重要 AI 革命的基建**。如果你也希望参与到这个项目的迭代，欢迎加入我们。
 
 - 💬 **[加入 Discord](https://discord.com/invite/8H6KpbXq3t)** —— 与社区一起共建。
-- ⭐ **[给项目点个 Star](https://github.com/sightflow-dev/sightflow-desktop-agent)** —— 这对我们真的很有帮助。
+- ⭐ **[给项目点个 Star](https://github.com/x18677770772-png/richcat-desktop-agent)** —— 这对我们真的很有帮助。
 - 🛠 **参与贡献** —— 欢迎提交 Issue 与 Pull Request。
 
 ---
@@ -223,10 +229,10 @@ SightFlow 的执行轨迹（work-trace）**默认保存在本地** —— 不会
 
 ## 📬 联系我们
 
-- 🌐 **官网：** [sightflow.dev](https://sightflow.dev)
-- ✉️ **邮箱：** [builder@sightflow.dev](mailto:builder@sightflow.dev)
+- 🌐 **GitHub：** https://github.com/x18677770772-png/richcat-desktop-agent
+
 - 💬 **Discord：** [加入社区](https://discord.com/invite/8H6KpbXq3t)
 
-<div align="center"><sub>© 2026 SightFlow. 基于 Apache License 2.0 开源。</sub></div>
+<div align="center"><sub>© 2026 财听猫. 基于 Apache License 2.0 开源。</sub></div>
 
 <p align="right"><a href="#readme-top">↑ 返回顶部</a></p>
