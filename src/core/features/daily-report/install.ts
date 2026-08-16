@@ -10,7 +10,7 @@ import { app, BrowserWindow, ipcMain, Notification } from 'electron'
 import { join } from 'node:path'
 import * as fs from 'node:fs'
 import { FeatureFlags } from '../flags'
-import { DailyReportGenerator, DailyReportScheduler } from './index'
+import { DailyReportGenerator, DailyReportScheduler, GenerateReportResult } from './index'
 import { FollowUpLike, HandoffLike } from './report'
 import { TraceSessionMeta } from '../../trace/trace-types'
 import { CustomerStore } from '../../customers/customer-store'
@@ -26,12 +26,18 @@ export interface InstallDailyReportOptions {
   listHandoffs?: () => HandoffLike[]
 }
 
+/** installDailyReport 返回句柄（main 保存引用供统一 onTimer 与显式清理） */
+export interface DailyReportHandle {
+  stop(): void
+  generateNow(day?: Date): Promise<GenerateReportResult>
+}
+
 /**
  * 装配 F6 服务日报：创建调度器（定时器仅 f6 flag 开时注册，防重复）、
  * 注册 report:generate / report:read IPC、挂 before-quit 清理。
- * 返回 { stop } 供 main 显式清理（可选；before-quit 已自动注册）。
+ * 返回 { stop, generateNow } 供 main 统一 onTimer 与显式清理（可选；before-quit 已自动注册）。
  */
-export function installDailyReport(options: InstallDailyReportOptions): { stop(): void } {
+export function installDailyReport(options: InstallDailyReportOptions): DailyReportHandle {
   const scheduler = new DailyReportScheduler({
     flags: options.flags,
     generator: new DailyReportGenerator({
@@ -81,5 +87,5 @@ export function installDailyReport(options: InstallDailyReportOptions): { stop()
 
   const stop = (): void => scheduler.stop()
   app.on('before-quit', stop)
-  return { stop }
+  return { stop, generateNow: (day?: Date) => scheduler.generateNow(day) }
 }

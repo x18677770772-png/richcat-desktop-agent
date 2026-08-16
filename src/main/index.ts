@@ -56,7 +56,7 @@ import {
 // ── F1 群聊支持（阶段 1）──
 import { createGroupChatFeature, GroupChatDetector } from '../core/features/group-chat'
 // ── F6 服务日报（阶段 2；装配层在 features/daily-report/install.ts，本文件仅两行接线）──
-import { installDailyReport } from '../core/features/daily-report/install'
+import { DailyReportHandle, installDailyReport } from '../core/features/daily-report/install'
 // ── F7 待跟进提醒（阶段 2；装配层在 features/follow-up/install.ts）──
 import { FollowUpStore, handleFollowUpResult } from '../core/features/follow-up'
 import { installFollowUp } from '../core/features/follow-up/install'
@@ -70,6 +70,26 @@ import {
 import { installHumanHandoff, HumanHandoffServices } from '../core/features/human-handoff/install'
 // ── F5 情绪/风险识别（F2 升级通道接线）──
 import { handleEmotionResult } from '../core/features/emotion-risk'
+// ── 统一功能注册（装配集成：FeatureRegistry 按 flag 驱动全部 FeatureModule）──
+import { FeatureHookContext, FeatureRegistry } from '../core/features/hooks'
+import { assembleSystemPrompt } from '../core/prompt'
+import { buildMemorySection } from '../core/ai-client'
+import { buildGroupChatSection } from '../core/features/group-chat/section'
+import { buildEmotionSection } from '../core/features/emotion-risk/section'
+import { buildHandoffSection } from '../core/features/human-handoff/section'
+import { buildFollowUpSection } from '../core/features/follow-up/section'
+import {
+  handleVipAfterReply,
+  handleVipBeforeProvider,
+  VipHookContext
+} from '../core/features/vip'
+import { isVip as isVipCustomer } from '../core/features/vip/vip'
+import { createKnowledgeV2Feature } from '../core/features/knowledge-v2'
+import {
+  applyRoleRouting,
+  createRoleRoutingFeature,
+  RoleRoutingHookContext
+} from '../core/features/role-routing'
 const StoreClass = typeof Store === 'function' ? Store : ((Store as any).default as typeof Store)
 
 // ── 多开支持：--profile=<name> 数据隔离 ──
@@ -305,43 +325,238 @@ function buildHandoffContext(): HandoffHookContext {
   }
 }
 
+// ── 统一功能注册表（装配集成：installFeatures 按 flag 注册全部 FeatureModule）──
+let featureRegistry: FeatureRegistry | null = null
+
+function getFeatureRegistry(): FeatureRegistry {
+  if (!featureRegistry) {
+    featureRegistry = new FeatureRegistry(featureFlags)
+  }
+  return featureRegistry
+}
+
+/** 构造统一 FeatureHookContext（beforeProvider/afterProvider 共用；handoffServices 由 F2 install 提供） */
+function buildFeatureContext(input: ProviderInput, result?: SmartReplyResult): FeatureHookContext {
+  return {
+    input,
+    result,
+    flags: featureFlags,
+    stores: {
+      customer: getCustomerStore(),
+      knowledge: getKnowledgeStore(),
+      persona: getPersonaStore()
+    },
+    notify: (payload) => handoffServices?.notify(payload),
+    requestHandoff: (reason, contact, confidence) => {
+      handoffServices?.requestHandoff(reason as never, contact, confidence)
+    },
+    regenerate: buildRegenerate()
+  }
+}
+
+/** 指定联系人的客户记忆段（供 assembler customer 段 / F4 二次生成使用） */
+function getCustomerSectionFor(contact?: string): string {
+  if (!contact) return ''
+  const customer = getCustomerStore().getCustomerByName(contact)
+  return customer ? getCustomerStore().buildMemorySection(customer) : ''
+}
+
 /**
- * 组合结果钩子（LocalProvider.transformResult）：
- * 1. F5：情绪/风险 → 打标 + 通知 + 高风险升级人工接管（f5 关时跳过；失败吞掉）；
- * 2. F2：模型 handoff 信号 + 多轮未解决计数 → 打开接管单（f2 关时跳过）；
- * 3. F7：模型 followUp 承诺 → 生成待办（f7 关时跳过）；
- * 4. F1：群聊后置过滤（f1 关时原样返回）。
+ * F4 二次生成能力：用目标 persona 的 systemPrompt 重跑一次 getSmartReply。
+ * 失败/返回 null → 调用方回退第一段 reply（docs §3-F4 验收 2d：不报错）。
  */
-function transformProviderResult(result: SmartReplyResult, input: ProviderInput): SmartReplyResult {
-  if (featureFlags.isEnabled('f5.emotion_risk')) {
+function buildRegenerate(): (
+  input: ProviderInput,
+  personaPrompt: string
+) => Promise<SmartReplyResult | null> {
+  return async (input: ProviderInput, personaPrompt: string): Promise<SmartReplyResult | null> => {
     try {
-      handleEmotionResult({
-        result,
-        stores: { customer: getCustomerStore() },
-        notify: (payload) => handoffServices?.notify(payload),
-        requestHandoff: (reason, confidence) => {
-          handoffServices?.requestHandoff(reason, result.contact ?? null, confidence)
-        }
+      const settings = normalizeSettings(settingsStore.store)
+      const ai = new AIClient({
+        apiKey: settings.chatProvider.config?.apiKey || settings.vision.apiKey,
+        model: settings.chatProvider.config?.model || FIXED_ARK_MODEL,
+        baseURL: settings.chatProvider.config?.baseURL || FIXED_ARK_BASE_URL
+      })
+      return await ai.getSmartReply(input.screenshot, {
+        systemPrompt: personaPrompt,
+        knowledgeSection: input.knowledgeSection,
+        customerSection: getCustomerSectionFor(input.currentContact),
+        memoryCards: input.memoryCards,
+        imageContext: input.imageContext
       })
     } catch (error) {
-      console.error('[Main] F5 情绪处理失败（不影响回复发送）:', error)
+      console.warn(
+        '[RoleRouting] 二次生成调用失败（回退第一段 reply）:',
+        error instanceof Error ? error.message : error
+      )
+      return null
     }
   }
-  if (featureFlags.isEnabled('f2.human_handoff')) {
-    try {
-      captureHandoffResult(result, buildHandoffContext(), featureFlags)
-    } catch (error) {
-      console.error('[Main] F2 接管判断失败（不影响回复发送）:', error)
-    }
+}
+
+/**
+ * F10：每轮 provider 调用前组装完整 system prompt（RuntimeHost.buildAssembledPrompt 回调）。
+ * - 先跑 beforeProvider 链（F3 vip 注入 vipSection/isVip、F4 路由段、F9 替换知识段）；
+ * - 再把各功能段传入 PromptAssembler 按固定顺序拼接（flag + 场景双条件由 assembler 控制）；
+ * - f10 关闭 / 任意失败 → 返回 undefined（LocalProvider 走旧拼装，V1 等价）。
+ */
+function buildAssembledPromptFor(input: ProviderInput): string | undefined {
+  if (!featureFlags.isEnabled('f10.prompt_system')) {
+    return undefined // f10 关 → 完全回退旧拼装（关闭零影响）
   }
-  if (featureFlags.isEnabled('f7.follow_up')) {
-    try {
-      handleFollowUpResult(result, getFollowUpStore())
-    } catch (error) {
-      console.error('[Main] F7 待办生成失败（不影响回复发送）:', error)
-    }
+  const ctx = buildFeatureContext(input)
+  try {
+    void getFeatureRegistry().runBeforeProvider(ctx)
+  } catch (error) {
+    console.error('[Main] beforeProvider 链执行失败（继续用未注入段）:', error)
   }
-  return filterF1GroupChatResult(result, input)
+
+  return assembleSystemPrompt({
+    personaPrompt: input.personaPrompt,
+    knowledgeSection: ctx.input.knowledgeSection,
+    customerSection: getCustomerSectionFor(input.currentContact),
+    memorySection: buildMemorySection(input.memoryCards),
+    imageContext: input.imageContext,
+    isVip: ctx.isVip,
+    multiRole: ctx.multiRole,
+    groupChatSection:
+      input.groupChat?.isGroup ? buildGroupChatSection(input.groupChat) : undefined,
+    vipSection: ctx.vipSection,
+    routingSection: ctx.routingSection,
+    handoffSection: buildHandoffSection(),
+    emotionSection: buildEmotionSection(),
+    followUpSection: buildFollowUpSection(),
+    flags: featureFlags
+  })
+}
+
+/**
+ * 组合结果钩子（LocalProvider.transformResult）——统一走 FeatureRegistry.afterProvider：
+ * F5 情绪/风险、F2 接管信号、F7 待办、F4 二次路由（各自 flag 门控，registry 内 try/catch），
+ * 最后 F1 群聊后置过滤（需返回新 result，保留在链尾）。
+ */
+async function transformProviderResult(
+  result: SmartReplyResult,
+  input: ProviderInput
+): Promise<SmartReplyResult> {
+  const ctx = buildFeatureContext(input, result)
+  await getFeatureRegistry().runAfterProvider(ctx)
+  return filterF1GroupChatResult(ctx.result ?? result, input)
+}
+
+/**
+ * 统一装配：注册全部 FeatureModule（按 flag 驱动）。各 feature 适配为 FeatureModule 形状：
+ * - beforeProvider：F3 VIP（段/场景判定）、F4 路由段、F9 知识 V2（替换 knowledgeSection）；
+ * - afterProvider：F5 情绪、F2 接管、F7 待办、F4 二次生成（写回 ctx.result）；
+ * - afterReply：F3 VIP 服务日志；
+ * - onTimer：F6 日报（统一入口；实际定时器由 installDailyReport 管理，避免双调度）。
+ * F1 后置过滤保留在 transformProviderResult 链尾（需返回新 result，hook 不支持返回值）；
+ * F8 为占位（无钩子）。
+ */
+function installFeatures(): void {
+  const registry = getFeatureRegistry()
+  // F3 回复前人工确认（confirmBeforeReply）为 F3 后续增量；配置位接入时在此读取
+  // settings.featuresConfig.f3.confirmBeforeReply。当前确认流程未实现 → 恒 false。
+  const f3Confirm = (): boolean => false
+
+  registry.registerAll([
+    {
+      flagKey: 'f3.vip_service',
+      beforeProvider: (ctx) => {
+        // 输出槽经 vipCtx 回写（handleVipBeforeProvider 修改的是传入对象）
+        const vipCtx: VipHookContext = {
+          input: ctx.input,
+          stores: { customer: ctx.stores.customer!, knowledge: ctx.stores.knowledge },
+          confirmBeforeReply: f3Confirm()
+        }
+        handleVipBeforeProvider(vipCtx)
+        ctx.isVip = vipCtx.isVip
+        ctx.vipSection = vipCtx.vipSection
+        ctx.vipItems = vipCtx.vipItems
+      },
+      afterReply: (ctx, replyText) => {
+        // afterReply 与 beforeProvider 的 ctx 是独立实例：此处按 currentContact 重新判定 VIP
+        const contact = ctx.input.currentContact?.trim()
+        const customer = contact ? (ctx.stores.customer?.getCustomerByName(contact) ?? null) : null
+        handleVipAfterReply(
+          {
+            input: ctx.input,
+            stores: { customer: ctx.stores.customer! },
+            isVip: customer ? isVipCustomer(customer) : false
+          },
+          replyText
+        )
+      }
+    },
+    {
+      flagKey: 'f9.knowledge_v2',
+      beforeProvider: (ctx) => {
+        createKnowledgeV2Feature().beforeProvider({
+          input: ctx.input,
+          stores: { knowledge: ctx.stores.knowledge! },
+          flags: ctx.flags,
+          injection: { isVip: ctx.isVip === true, isGroup: ctx.input.groupChat?.isGroup === true }
+        })
+      }
+    },
+    {
+      flagKey: 'f4.role_routing',
+      beforeProvider: (ctx) => {
+        // 输出槽经 routingCtx 回写（handleRoutingBeforeProvider 修改的是传入对象）
+        const routingCtx: RoleRoutingHookContext = {
+          input: ctx.input,
+          stores: { persona: ctx.stores.persona! },
+          flags: ctx.flags
+        }
+        createRoleRoutingFeature().beforeProvider(routingCtx)
+        ctx.multiRole = routingCtx.multiRole
+        ctx.routingSection = routingCtx.routingSection
+      },
+      afterProvider: async (ctx) => {
+        const next = await applyRoleRouting(ctx.result, {
+          stores: { persona: ctx.stores.persona! },
+          input: ctx.input,
+          regenerate: ctx.regenerate,
+          flags: ctx.flags
+        })
+        ctx.result = next
+      }
+    },
+    {
+      flagKey: 'f5.emotion_risk',
+      afterProvider: (ctx) => {
+        handleEmotionResult({
+          result: ctx.result,
+          stores: { customer: ctx.stores.customer! },
+          notify: (payload) => ctx.notify?.(payload),
+          requestHandoff: (reason, confidence) => {
+            ctx.requestHandoff?.(reason, ctx.result?.contact ?? null, confidence)
+          }
+        })
+      }
+    },
+    {
+      flagKey: 'f2.human_handoff',
+      afterProvider: (ctx) => {
+        if (ctx.result) captureHandoffResult(ctx.result, buildHandoffContext(), ctx.flags)
+      }
+    },
+    {
+      flagKey: 'f7.follow_up',
+      afterProvider: (ctx) => {
+        if (ctx.result) handleFollowUpResult(ctx.result, getFollowUpStore())
+      }
+    },
+    {
+      flagKey: 'f6.daily_report',
+      onTimer: async (_kind, now) => {
+        await dailyReportHandle?.generateNow(now)
+      }
+    }
+  ])
+  console.log(
+    `[Features] 统一注册完成，当前开启: ${registry.enabled().map((m) => m.flagKey).join(', ') || '无'}`
+  )
 }
 
 let runtime: RuntimeHost<ReturnType<typeof createInitialGenericChannelState>> | null = null
@@ -351,6 +566,8 @@ let settingsWindow: BrowserWindow | null = null
 let memoryWindow: BrowserWindow | null = null
 let knowledgeWindow: BrowserWindow | null = null
 let customerWindow: BrowserWindow | null = null
+// F6：服务日报句柄（whenReady 内创建；统一 onTimer 与 before-quit 清理）
+let dailyReportHandle: DailyReportHandle | null = null
 
 // ── 工作记忆（work-trace + 经验卡片）单例，首次使用时初始化 ──
 let traceRecorderInstance: TraceRecorder | null = null
@@ -1261,7 +1478,7 @@ app.whenReady().then(async () => {
   startSkillServer(skillEngineController, PROFILE)
 
   // ── F6 服务日报装配（定时器仅 f6 flag 开时注册；before-quit 清理在 install 内部）──
-  installDailyReport({
+  dailyReportHandle = installDailyReport({
     flags: featureFlags,
     getCustomerStore,
     worktraceBaseDir,
@@ -1290,6 +1507,9 @@ app.whenReady().then(async () => {
       normalizeSettings(settingsStore.store).featuresConfig?.f2?.maxUnresolvedTurns ??
       DEFAULT_MAX_UNRESOLVED_TURNS
   })
+
+  // ── 统一功能注册（FeatureRegistry 按 flag 驱动全部 FeatureModule；须在 install* 之后）──
+  installFeatures()
 
   createWindow()
 
@@ -1460,6 +1680,8 @@ async function startEngineCore(rawConfig?: any): Promise<SkillStartResult> {
       getKnowledgeSection: () => buildKnowledgeSection(getKnowledgeStore().getInjectionItems()),
       // ── F1 群聊检测（f1 关 → 立即返回 undefined，零 VLM 调用）──
       getGroupChatContext: getGroupChatContextForSession,
+      // ── F10 完整 prompt 组装（PromptAssembler + beforeProvider 链；f10 关 → undefined 走旧拼装）──
+      buildAssembledPrompt: buildAssembledPromptFor,
       onSessionEnd: () => recorder.endSession()
     })
 

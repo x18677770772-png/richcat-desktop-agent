@@ -31,6 +31,13 @@ interface RuntimeHostOptions<TState> {
    * 检测失败/抛错被吞掉（按单聊处理），绝不影响主链路。
    */
   getGroupChatContext?: (screenshot: string) => Promise<GroupChatContext | undefined>
+  /**
+   * F10：每轮 provider 调用前组装完整 system prompt（装配方实现：内部调用
+   * PromptAssembler.assembleSystemPrompt 并执行各 feature 的 beforeProvider）。
+   * 返回 undefined 时不注入 assembledPrompt——LocalProvider 走旧拼装路径（向后兼容）；
+   * 抛错被吞掉并按未注入处理（绝不阻断主链路）。
+   */
+  buildAssembledPrompt?: (enriched: ProviderInput) => string | undefined
   /** 会话结束（含内部错误停止）时回调，用于收尾轨迹会话 */
   onSessionEnd?: () => void
 }
@@ -137,7 +144,21 @@ export class RuntimeHost<TState> {
       ...(groupChat ? { groupChat } : {})
     }
 
-    for await (const event of this.options.provider.run(enriched)) {
+    // F10：装配完整 system prompt（PromptAssembler 由装配方实现；失败/未提供 → 不注入，
+    // LocalProvider 走旧拼装，向后兼容）
+    let assembledPrompt: string | undefined
+    if (this.options.buildAssembledPrompt) {
+      try {
+        assembledPrompt = this.options.buildAssembledPrompt(enriched)
+      } catch (error) {
+        console.error('[RuntimeHost] 组装完整 prompt 失败（走旧拼装路径）:', error)
+      }
+    }
+    const finalInput: ProviderInput = assembledPrompt
+      ? { ...enriched, assembledPrompt }
+      : enriched
+
+    for await (const event of this.options.provider.run(finalInput)) {
       yield event
     }
   }

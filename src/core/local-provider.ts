@@ -30,11 +30,15 @@ export interface LocalProviderContext {
   /** 回写客户长期记忆（contact 为 null 时不回写） */
   recordCustomerMemory?: (contact: string, summary: string, reply: string | null) => void
   /**
-   * 每轮 getSmartReply 结果的后处理钩子（F1 后置过滤 / F2/F5/F7 消费入口）。
-   * 返回的 result 用于本轮发送判定与记忆回写；抛错被吞掉（记日志，不影响主链路）。
+   * 每轮 getSmartReply 结果的后处理钩子（F1 后置过滤 / F2/F4/F5/F7 消费入口）。
+   * 返回的 result 用于本轮发送判定与记忆回写；支持同步或异步（F4 二次生成需 await）。
+   * 抛错被吞掉（记日志，不影响主链路）。
    * flag 关闭时装配方传入的实现应立即原样返回 result（零影响）。
    */
-  transformResult?: (result: SmartReplyResult, input: ProviderInput) => SmartReplyResult
+  transformResult?: (
+    result: SmartReplyResult,
+    input: ProviderInput
+  ) => SmartReplyResult | Promise<SmartReplyResult>
   /**
    * F2：会话级暂停判定——上一轮识别到的联系人（lastContact）是否已被人工接管。
    * 返回 true → 本轮直接 skip（不发 AI 调用，零成本）；flag 关时装配方返回 false（零影响）。
@@ -98,7 +102,7 @@ export class LocalProvider implements ProviderAdapter {
       }
 
       // ── 结果后处理钩子（F1 后置过滤等；失败仅记日志，绝不影响发送判定）──
-      const finalResult = this.applyTransformResult(result, input)
+      const finalResult = await this.applyTransformResult(result, input)
 
       // 识别到联系人 → 更新缓存 + 回写客户档案
       if (finalResult.contact) {
@@ -152,10 +156,13 @@ export class LocalProvider implements ProviderAdapter {
   }
 
   /** 调用装配方注入的 transformResult；任何异常吞掉并记日志，返回原 result（不阻塞主链路） */
-  private applyTransformResult(result: SmartReplyResult, input: ProviderInput): SmartReplyResult {
+  private async applyTransformResult(
+    result: SmartReplyResult,
+    input: ProviderInput
+  ): Promise<SmartReplyResult> {
     if (!this.context.transformResult) return result
     try {
-      return this.context.transformResult(result, input)
+      return await this.context.transformResult(result, input)
     } catch (error) {
       console.error('[LocalProvider] transformResult 钩子执行失败（忽略，使用原始结果）:', error)
       return result
