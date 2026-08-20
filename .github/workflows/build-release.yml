@@ -9,9 +9,9 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [windows-latest]
+        os: [windows-2022]
         include:
-          - os: windows-latest
+          - os: windows-2022
             target: win
             ext: '.exe'
     runs-on: ${{ matrix.os }}
