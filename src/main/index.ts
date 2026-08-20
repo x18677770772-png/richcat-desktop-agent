@@ -90,6 +90,9 @@ import {
   createRoleRoutingFeature,
   RoleRoutingHookContext
 } from '../core/features/role-routing'
+// ── 企业版：License / 审计 / 用量 / 密钥加密 门面（E2-E6）──
+import { createEnterpriseServices, EnterpriseServices } from '../core/enterprise'
+import type { AuditFilter } from '../core/enterprise/audit'
 const StoreClass = typeof Store === 'function' ? Store : ((Store as any).default as typeof Store)
 
 // ── 多开支持：--profile=<name> 数据隔离 ──
@@ -164,6 +167,11 @@ interface AppSettings {
     /** F2 人工接管：多轮未解决上限（默认 3） */
     f2?: { maxUnresolvedTurns?: number }
   }
+  // 企业版：设备指纹 + 主密钥（密钥静态加密基线；License 状态独立落盘 worktrace/enterprise/license.json）
+  enterprise?: {
+    deviceId?: string
+    masterKey?: string
+  }
 }
 
 type ProviderConfigFieldType = 'text' | 'password' | 'url' | 'select' | 'textarea'
@@ -230,7 +238,8 @@ const settingsStore = new StoreClass({
     },
     defaultCaptureStrategy: 'auto',
     capture: {},
-    featuresConfig: {}
+    featuresConfig: {},
+    enterprise: { deviceId: '', masterKey: '' }
   }
 })
 
@@ -373,7 +382,7 @@ function buildRegenerate(): (
     try {
       const settings = normalizeSettings(settingsStore.store)
       const ai = new AIClient({
-        apiKey: settings.chatProvider.config?.apiKey || settings.vision.apiKey,
+        apiKey: resolveChatApiKey(settings),
         model: settings.chatProvider.config?.model || FIXED_ARK_MODEL,
         baseURL: settings.chatProvider.config?.baseURL || FIXED_ARK_BASE_URL
       })
@@ -441,7 +450,19 @@ async function transformProviderResult(
 ): Promise<SmartReplyResult> {
   const ctx = buildFeatureContext(input, result)
   await getFeatureRegistry().runAfterProvider(ctx)
-  return filterF1GroupChatResult(ctx.result ?? result, input)
+  const final = filterF1GroupChatResult(ctx.result ?? result, input)
+
+  // ── 企业版：用量计量（回复/跳过/接管 + API 调用估算）──
+  try {
+    const usage = getEnterpriseServices().usage
+    if (final.reply) usage.recordMessage('reply')
+    else if (final.handoff) usage.recordMessage('handoff')
+    else usage.recordMessage('skip')
+    usage.recordApiCall()
+  } catch (error) {
+    console.error('[Enterprise] 用量计量失败:', error)
+  }
+  return final
 }
 
 /**
@@ -617,6 +638,63 @@ function getCustomerStore(): CustomerStore {
     )
   }
   return customerStoreInstance
+}
+
+// ── 企业版单例（License / 审计 / 用量 / 密钥加密；首次访问时按 settings 初始化）──
+let enterpriseServicesInstance: EnterpriseServices | null = null
+
+function getEnterpriseServices(): EnterpriseServices {
+  if (!enterpriseServicesInstance) {
+    enterpriseServicesInstance = createEnterpriseServices({
+      baseDir: worktraceBaseDir(),
+      getMasterKey: () => normalizeSettings(settingsStore.store).enterprise?.masterKey ?? '',
+      setMasterKey: (key) => settingsStore.set('enterprise.masterKey', key),
+      getDeviceId: () => normalizeSettings(settingsStore.store).enterprise?.deviceId ?? '',
+      setDeviceId: (id) => settingsStore.set('enterprise.deviceId', id)
+    })
+  }
+  return enterpriseServicesInstance
+}
+
+/**
+ * 解密已加密存储的 API Key（密文格式 `enc:v1:<SecretBox payload>`）。
+ * 明文历史数据原样返回（兼容迁移）；解密失败回退原文并记 log，不阻断启动。
+ */
+function decryptStoredKey(value: unknown): string {
+  if (typeof value !== 'string' || !value) return ''
+  const PREFIX = 'enc:v1:'
+  if (!value.startsWith(PREFIX)) return value
+  try {
+    return getEnterpriseServices().secretBox.decrypt(value.slice(PREFIX.length))
+  } catch (error) {
+    // 解密失败：返回空串而非"去前缀的密文垃圾"，避免把 base64 乱码当真实密钥发送
+    console.error('[Enterprise] 密钥解密失败（返回空值，请重新填写 API Key）:', error)
+    return ''
+  }
+}
+
+/** 解析聊天回复模型密钥（chatProvider 优先，回退视觉密钥）；密文自动解密。 */
+function resolveChatApiKey(settings: AppSettings): string {
+  const chatKey = decryptStoredKey(settings.chatProvider.config?.apiKey)
+  return chatKey || resolveVisionConfig(settings).apiKey
+}
+
+/** settings 返回给 renderer 前，把加密的 API Key 还原为明文（UI 展示与回写用）。 */
+function withDecryptedKeys(settings: AppSettings): AppSettings {
+  return {
+    ...settings,
+    vision: {
+      ...settings.vision,
+      apiKey: decryptStoredKey(settings.vision.apiKey)
+    },
+    chatProvider: {
+      ...settings.chatProvider,
+      config: {
+        ...settings.chatProvider.config,
+        apiKey: decryptStoredKey(settings.chatProvider.config?.apiKey)
+      }
+    }
+  }
 }
 
 function createWindow(): void {
@@ -1002,12 +1080,22 @@ app.whenReady().then(async () => {
 
   // ── Settings 持久化 ──
   ipcMain.handle('settings:getAll', async () => {
-    return normalizeSettings(settingsStore.store)
+    return withDecryptedKeys(normalizeSettings(settingsStore.store))
   })
 
   ipcMain.handle('settings:get', async (_event, key: string) => {
     const settings = normalizeSettings(settingsStore.store)
-    return (settings as Record<string, any>)[key]
+    const value = (settings as Record<string, any>)[key]
+    if (key === 'vision' && value?.apiKey) {
+      return { ...value, apiKey: decryptStoredKey(value.apiKey) }
+    }
+    if (key === 'chatProvider' && value?.config?.apiKey) {
+      return {
+        ...value,
+        config: { ...value.config, apiKey: decryptStoredKey(value.config.apiKey) }
+      }
+    }
+    return value
   })
 
   ipcMain.handle('settings:set', async (_event, data: Record<string, any>) => {
@@ -1032,6 +1120,40 @@ app.whenReady().then(async () => {
         ...(data.capture || {})
       }
     } satisfies AppSettings
+
+    // ── 企业版：API Key 变化时加密存储 + 审计记录 ──
+    // 注意：current.vision.apiKey 是 store 中的密文，必须解密后与 renderer 传来的明文比较，
+    // 否则每次保存都误判"已变化"→ 重复加密 + 虚假审计。
+    const currentVisionKey = decryptStoredKey(current.vision.apiKey)
+    const currentChatKey = decryptStoredKey(current.chatProvider.config?.apiKey)
+    const visionChanged = data.vision?.apiKey !== undefined && data.vision.apiKey !== currentVisionKey
+    const chatChanged =
+      data.chatProvider?.config?.apiKey !== undefined &&
+      data.chatProvider.config.apiKey !== currentChatKey
+
+    if (visionChanged && data.vision.apiKey) {
+      try {
+        const box = getEnterpriseServices().secretBox
+        next.vision.apiKey = 'enc:v1:' + box.encrypt(data.vision.apiKey)
+        getEnterpriseServices().audit.record('settings.vision.key.updated', 'user', '视觉密钥已更新')
+      } catch (error) {
+        console.error('[Enterprise] 密钥加密失败（保留旧值）:', error)
+        // 加密失败 → 不写明文，保留旧密文（fail-closed）
+        next.vision.apiKey = current.vision.apiKey
+      }
+    }
+    if (chatChanged && data.chatProvider.config.apiKey) {
+      try {
+        const box = getEnterpriseServices().secretBox
+        next.chatProvider.config.apiKey = 'enc:v1:' + box.encrypt(data.chatProvider.config.apiKey)
+      } catch (error) {
+        console.error('[Enterprise] 聊天密钥加密失败（保留旧值）:', error)
+        next.chatProvider.config.apiKey = current.chatProvider.config?.apiKey ?? ''
+      }
+    }
+    if (visionChanged || chatChanged) {
+      getEnterpriseServices().audit.record('settings.update', 'user', 'API Key 配置已更新')
+    }
 
     settingsStore.set(next as any)
     return { success: true }
@@ -1367,12 +1489,12 @@ app.whenReady().then(async () => {
     if (runtimeDevice) {
       // setVisionConfig 在 BoxSelectDevice 上是 no-op，对 RPADevice 才生效。
       runtimeDevice.setVisionConfig?.(resolveVisionConfig(settings))
-      runtimeDevice.setApiKey(settings.vision.apiKey)
+      runtimeDevice.setApiKey(resolveVisionConfig(settings).apiKey)
       runtimeDevice.setAppType(settings.appType)
     }
     if (runtimeProvider instanceof LocalProvider) {
       runtimeProvider.updateConfig({
-        apiKey: settings.chatProvider.config?.apiKey || settings.vision.apiKey,
+        apiKey: resolveChatApiKey(settings),
         model: settings.chatProvider.config?.model || FIXED_ARK_MODEL,
         baseURL: settings.chatProvider.config?.baseURL || FIXED_ARK_BASE_URL,
         systemPrompt: settings.chatProvider.config?.systemPrompt || undefined
@@ -1477,6 +1599,37 @@ app.whenReady().then(async () => {
   // ── Skill HTTP Server（OpenClaw 远程启动 / 暂停接入点） ──
   startSkillServer(skillEngineController, PROFILE)
 
+  // ── 企业版 IPC（License / 审计 / 用量）──
+  const ent = (): EnterpriseServices => getEnterpriseServices()
+
+  ipcMain.handle('enterprise:license:getState', async () => ent().license.getState())
+  ipcMain.handle('enterprise:license:startTrial', async () => {
+    const state = ent().license.startTrial()
+    ent().audit.record('license.trial.start', 'user', '开始 14 天试用')
+    return state
+  })
+  ipcMain.handle('enterprise:license:activate', async (_event, licenseKey: string) => {
+    const result = ent().license.activate(typeof licenseKey === 'string' ? licenseKey : '')
+    if (result.ok) {
+      ent().audit.record('license.activate', 'user', '授权激活', { plan: result.state.plan })
+    }
+    return result
+  })
+  ipcMain.handle('enterprise:license:canRun', async () => ent().license.canRun())
+  ipcMain.handle('enterprise:license:degradation', async () => ent().license.degradation())
+  ipcMain.handle(
+    'enterprise:audit:list',
+    async (_event, filter: AuditFilter | undefined) => ent().audit.list(filter || undefined)
+  )
+  ipcMain.handle(
+    'enterprise:audit:export',
+    async (_event, filter: AuditFilter | undefined) => ent().audit.export(filter || undefined)
+  )
+  ipcMain.handle('enterprise:audit:count', async () => ent().audit.count())
+  ipcMain.handle('enterprise:usage:getToday', async () => ent().usage.getToday())
+  ipcMain.handle('enterprise:usage:isQuotaExceeded', async () => ent().usage.isQuotaExceeded())
+  ipcMain.handle('enterprise:usage:overageMessage', async () => ent().usage.overageMessage())
+
   // ── F6 服务日报装配（定时器仅 f6 flag 开时注册；before-quit 清理在 install 内部）──
   dailyReportHandle = installDailyReport({
     flags: featureFlags,
@@ -1540,6 +1693,12 @@ async function startEngineCore(rawConfig?: any): Promise<SkillStartResult> {
     return { ok: false, reason: 'already_running', message: '引擎已在运行中' }
   }
 
+  // ── 企业版：License 门禁（试用/激活/宽限期可运行；过期阻止启动）──
+  const license = getEnterpriseServices().license
+  if (!license.canRun()) {
+    return { ok: false, reason: 'license_expired', message: license.degradation() }
+  }
+
   try {
     const settings = normalizeSettings(rawConfig || settingsStore.store)
     const appType: AppType = settings.appType || 'wechat'
@@ -1560,7 +1719,7 @@ async function startEngineCore(rawConfig?: any): Promise<SkillStartResult> {
     if (!settings.chatProvider.installed) {
       provider = new LocalProvider({
         ai: {
-          apiKey: settings.chatProvider.config?.apiKey || settings.vision.apiKey,
+          apiKey: resolveChatApiKey(settings),
           model: settings.chatProvider.config?.model || FIXED_ARK_MODEL,
           baseURL: settings.chatProvider.config?.baseURL || FIXED_ARK_BASE_URL,
           systemPrompt: settings.chatProvider.config?.systemPrompt || undefined
@@ -1583,10 +1742,13 @@ async function startEngineCore(rawConfig?: any): Promise<SkillStartResult> {
               console.error('[Main] 客户记忆回写失败:', error)
             }
           },
-          // ── F1/F2/F5/F7 结果钩子 + F2 会话暂停（各自 flag 门控，关闭零影响）──
+          // ── F1/F2/F5/F7 结果钩子 + F2 会话暂停 + 企业版（License 运行期熔断 + 配额熔断）──
+          // 每个钩子各自 try/catch，关闭/异常零影响。
           transformResult: transformProviderResult,
           shouldSkipContact: (contact) =>
-            featureFlags.isEnabled('f2.human_handoff') && handoffPausedContacts.has(contact)
+            !getEnterpriseServices().license.canRun() || // 运行中 License 过期 → 停自动回复
+            getEnterpriseServices().usage.isQuotaExceeded() ||
+            (featureFlags.isEnabled('f2.human_handoff') && handoffPausedContacts.has(contact))
         }
       })
     } else {
@@ -1609,8 +1771,8 @@ async function startEngineCore(rawConfig?: any): Promise<SkillStartResult> {
       }
 
       const effectiveConfig = isDoubao
-        ? { ...settings.chatProvider.config, apiKey: settings.vision.apiKey }
-        : settings.chatProvider.config
+        ? { ...settings.chatProvider.config, apiKey: resolveVisionConfig(settings).apiKey }
+        : { ...settings.chatProvider.config, apiKey: resolveChatApiKey(settings) }
 
       const loaded = await loadInstalledProvider(settings.chatProvider.installed, effectiveConfig)
       provider = loaded.provider
@@ -1685,6 +1847,10 @@ async function startEngineCore(rawConfig?: any): Promise<SkillStartResult> {
       onSessionEnd: () => recorder.endSession()
     })
 
+    // ── 企业版：用量计量（会话启动计数）+ 审计（仅在真正启动成功后记录）──
+    getEnterpriseServices().usage.recordSession('start')
+    getEnterpriseServices().audit.record('engine.start', 'user', '引擎启动')
+
     runtime.startSession().catch((err: any) => {
       console.error('[Main] Runtime session error:', err)
     })
@@ -1707,6 +1873,9 @@ async function stopEngineCore(stopReason: string): Promise<SkillPauseResult> {
   }
   try {
     await runtime.stopSession(stopReason)
+    // ── 企业版：用量计量（会话停止）+ 审计 ──
+    getEnterpriseServices().usage.recordSession('stop')
+    getEnterpriseServices().audit.record('engine.stop', 'system', '引擎停止', { stopReason })
     runtimeProvider = null
     notifyEngineStateChanged('idle')
     return { ok: true }
@@ -1888,12 +2057,12 @@ function normalizeCapture(raw: unknown): Partial<Record<AppType, PerAppCapture>>
   return out
 }
 
-/** 解析当前视觉模型配置（含 Agent Plan 等自定义端点）；空值回退默认方舟 */
+/** 解析当前视觉模型配置（含 Agent Plan 等自定义端点）；空值回退默认方舟。密钥密文自动解密。 */
 function resolveVisionConfig(
   settings: AppSettings
 ): { apiKey: string; baseURL?: string; model?: string } {
   return {
-    apiKey: settings.vision.apiKey,
+    apiKey: decryptStoredKey(settings.vision.apiKey),
     baseURL: settings.vision.baseURL?.trim() || undefined,
     model: settings.vision.model?.trim() || undefined
   }
@@ -1976,7 +2145,13 @@ function normalizeSettings(raw: any): AppSettings {  const oldApiKey = typeof ra
     defaultCaptureStrategy: coerceStrategy(raw?.defaultCaptureStrategy, 'auto'),
     capture: normalizeCapture(raw?.capture),
     features: normalizeFeatures(raw?.features),
-    featuresConfig: normalizeFeaturesConfig(raw?.featuresConfig)
+    featuresConfig: normalizeFeaturesConfig(raw?.featuresConfig),
+    enterprise: {
+      deviceId:
+        typeof raw?.enterprise?.deviceId === 'string' ? raw.enterprise.deviceId : '',
+      masterKey:
+        typeof raw?.enterprise?.masterKey === 'string' ? raw.enterprise.masterKey : ''
+    }
   }
 }
 

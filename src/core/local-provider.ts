@@ -72,9 +72,12 @@ export class LocalProvider implements ProviderAdapter {
     await this.persistDebugInput(input)
     yield { type: 'thinking', content: this.buildThinkingMessage(input) }
 
-    // F2：上一轮联系人已被人工接管 → 本轮零调用直接跳过（该会话暂停自动回复）
-    if (this.lastContact && this.context.shouldSkipContact?.(this.lastContact)) {
-      console.log(`[LocalProvider] 客户「${this.lastContact}」已转人工，跳过本轮自动回复`)
+    // 企业版 License 过期 / 用量熔断 / F2 人工接管：任一触发 → 本轮零调用直接跳过
+    // 注意：lastContact 可能为空（新会话首条消息），熔断与联系人解耦，始终检查。
+    if (this.context.shouldSkipContact?.(this.lastContact ?? '')) {
+      console.log(
+        `[LocalProvider] 已熔断/接管（license/配额/人工），跳过本轮自动回复（contact=${this.lastContact ?? '未知'}）`
+      )
       yield { type: 'skip' }
       return
     }

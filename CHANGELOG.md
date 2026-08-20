@@ -25,6 +25,18 @@
 
 ---
 
+## [2.0.0-alpha.1] - 2026-08-20
+
+### Added（新增）
+- **企业版 v2.0 预览切片**（E2-E8）：License 授权核心（状态机：trial/active/grace/expired/invalid，14 天试用，激活码伪校验，到期降级门禁），审计日志（append-only JSONL，全操作留痕，可查询可导出），用量计量（日桶配额+硬封顶熔断，会话/消息/接管/API 调用计数），密钥加密（AES-256-GCM，API Key 密文存储，旧明文自动迁移），企业版 IPC（`enterprise:*` 通道），引擎钩子（License 门禁/用量计费/配额熔断 gate），EnterprisePanel UI（设置窗口「企业版」tab：授权卡/用量仪表盘/审计流）
+- 版本升级至 `2.0.0-alpha.1`（基于现行 master 的独立版本，不干扰社区版主线）
+
+### Fixed（修复）
+- **代码审查修复（CRITICAL/HIGH）**：① API Key 密文在远程启动/F4 二次路由/updateConfig 4 处被当明文使用 → 统一走 `resolveChatApiKey`/`resolveVisionConfig` 解密；② License 运行期熔断（shouldSkipContact 增 `canRun` 检查）；③ settings:set 密钥变化判定改为"解密后比较"，消除每次保存的虚假重加密与审计；④ 解密失败回退改为空值（不再把去前缀密文垃圾当密钥）；⑤ grace 宽限期 UI 文案与行为对齐；⑥ 密钥加密失败 fail-closed（保留旧值）；⑦ masterKey 非法时自动重新生成；⑧ settings:get 对 chatProvider 一并解密；⑨ engine.start 审计移到启动成功后；⑩ 熔断与 lastContact 解耦（空联系人也检查）；⑪ 删除 auditActionFor 死代码
+- `skill-server.ts` 补充 `license_expired` 状态码（402）
+
+---
+
 ## [1.1.0] - 2026-08-19
 
 ### Added（新增）
