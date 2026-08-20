@@ -25,6 +25,23 @@
 
 ---
 
+## [2.0.0-alpha.2] - 2026-08-20
+
+### Added（新增）
+- **总后台 Agent 遥测 SDK（C1）**：`src/core/enterprise/telemetry.ts` —— 心跳(60s)/用量(10min)/错误 三类事件上报到中央控制面；HMAC 脱敏设备标识；离线缓冲+重放(replayed 标记)；`setEnabled` 开关
+- **主进程遥测接线**：`telemetry:*` IPC（getConfig/setConfig/getStatus/flushQueue）；引擎启动/停止自动启停遥测；仅上报用量统计/心跳/错误码，不含聊天与客户内容（合规铁律）
+- **EnterprisePanel「总后台接入」UI**：后台地址（默认 `https://129.226.204.240:8443`）/ 站点 Token / 启用开关 / 保存与立即补发按钮 / 连接状态徽标
+- **中央管理后台（控制面）代码库**：`control-plane/` —— Go+Gin+PostgreSQL16+Redis 多租户后端（认证/遥测/舰队/告警/计费/超管）+ React 管理后台 Web（登录/舰队/用量/告警/计费/平台页）+ docker compose 部署 + nginx HTTPS 反代配置
+- 应用内版本号同步至 `v2.0.0-alpha.2`（`i18n.ts` app.version）
+
+### Changed（变更）
+- 版本升级至 `2.0.0-alpha.2`
+
+### Fixed（修复）
+- `i18n.ts` 应用内版本号从遗留的 `v1.1.0` 修正为 `v2.0.0-alpha.2`
+
+---
+
 ## [2.0.0-alpha.1] - 2026-08-20
 
 ### Added（新增）

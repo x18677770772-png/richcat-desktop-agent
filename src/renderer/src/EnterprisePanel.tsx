@@ -70,12 +70,38 @@ function fmtClock(ts: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+/** 遥测配置（与主进程 settings.telemetry 对齐） */
+interface TelemetryConfig {
+  enabled: boolean
+  controlPlaneUrl: string
+  siteToken: string
+  tenantId: string
+  siteId: string
+}
+
+/** 遥测状态 */
+interface TelemetryStatus {
+  configured: boolean
+  running: boolean
+  queueSize: number
+}
+
+const DEFAULT_CONTROL_PLANE_URL = 'https://129.226.204.240:8443'
+
 export default function EnterprisePanel(): React.JSX.Element {
   const [license, setLicense] = useState<LicenseState | null>(null)
   const [usage, setUsage] = useState<UsageSnapshot | null>(null)
   const [audits, setAudits] = useState<AuditEvent[]>([])
   const [keyInput, setKeyInput] = useState('')
   const [busy, setBusy] = useState(false)
+  const [telemetryForm, setTelemetryForm] = useState({
+    enabled: false,
+    controlPlaneUrl: DEFAULT_CONTROL_PLANE_URL,
+    siteToken: '',
+    tenantId: '',
+    siteId: ''
+  })
+  const [telemetryStatus, setTelemetryStatus] = useState<TelemetryStatus | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -98,10 +124,71 @@ export default function EnterprisePanel(): React.JSX.Element {
           if (!cancelled && Array.isArray(aud)) setAudits(aud as AuditEvent[])
         })
         .catch((error: unknown) => console.error('[Enterprise] audit 读取失败:', error))
+      window.electron
+        ?.invoke('telemetry:getConfig')
+        .then((cfg) => {
+          if (!cancelled && cfg) {
+            const c = cfg as TelemetryConfig
+            setTelemetryForm({
+              enabled: c.enabled,
+              controlPlaneUrl: c.controlPlaneUrl || DEFAULT_CONTROL_PLANE_URL,
+              siteToken: c.siteToken || '',
+              tenantId: c.tenantId || '',
+              siteId: c.siteId || ''
+            })
+          }
+        })
+        .catch((error: unknown) => console.error('[Enterprise] telemetry 配置读取失败:', error))
+      window.electron
+        ?.invoke('telemetry:getStatus')
+        .then((st) => {
+          if (!cancelled && st) setTelemetryStatus(st as TelemetryStatus)
+        })
+        .catch((error: unknown) => console.error('[Enterprise] telemetry 状态读取失败:', error))
     }
     load()
     return () => {
       cancelled = true
+    }
+  }, [])
+
+  const saveTelemetry = useCallback(async () => {
+    setBusy(true)
+    try {
+      const result = (await window.electron.invoke('telemetry:setConfig', telemetryForm)) as {
+        success: boolean
+      }
+      if (result.success) {
+        showToast('总后台接入配置已保存', 'success')
+      } else {
+        showToast('保存失败', 'error')
+      }
+    } catch (error) {
+      console.error('[Enterprise] telemetry 保存失败:', error)
+      showToast('保存失败', 'error')
+    } finally {
+      setBusy(false)
+    }
+  }, [telemetryForm])
+
+  const flushTelemetry = useCallback(async () => {
+    setBusy(true)
+    try {
+      const result = (await window.electron.invoke('telemetry:flushQueue')) as {
+        ok: boolean
+        sent?: number
+      }
+      if (result.ok) {
+        showToast(`已补发 ${result.sent ?? 0} 条离线数据`, 'success')
+        const st = (await window.electron.invoke('telemetry:getStatus')) as TelemetryStatus
+        setTelemetryStatus(st)
+      } else {
+        showToast(result.sent === undefined ? '遥测未启用' : '补发失败', 'error')
+      }
+    } catch (error) {
+      console.error('[Enterprise] telemetry 补发失败:', error)
+    } finally {
+      setBusy(false)
     }
   }, [])
 
@@ -311,6 +398,69 @@ export default function EnterprisePanel(): React.JSX.Element {
             </div>
           ))}
         </div>
+      </section>
+
+      {/* ④ 总后台接入（遥测） */}
+      <section className="ent-card">
+        <div className="ent-card-head">
+          <span className="ent-card-title">总后台接入（遥测上报）</span>
+          <span
+            className={`ent-status-badge ${
+              telemetryStatus?.configured ? 'ent-status-active' : 'ent-status-invalid'
+            }`}
+          >
+            {telemetryStatus?.configured ? '已连接' : '未启用'}
+          </span>
+        </div>
+        <div className="ent-telemetry-form">
+          <label className="ent-field">
+            <span className="ent-field-label">后台地址</span>
+            <input
+              className="ent-input ent-mono"
+              placeholder={DEFAULT_CONTROL_PLANE_URL}
+              value={telemetryForm.controlPlaneUrl}
+              onChange={(e) => setTelemetryForm({ ...telemetryForm, controlPlaneUrl: e.target.value })}
+            />
+          </label>
+          <label className="ent-field">
+            <span className="ent-field-label">站点 Token</span>
+            <input
+              className="ent-input ent-mono"
+              placeholder="企业后台创建时生成的 site_token"
+              value={telemetryForm.siteToken}
+              onChange={(e) => setTelemetryForm({ ...telemetryForm, siteToken: e.target.value })}
+            />
+          </label>
+          <div className="ent-activate-row">
+            <label className="ent-telemetry-toggle">
+              <input
+                type="checkbox"
+                checked={telemetryForm.enabled}
+                onChange={(e) =>
+                  setTelemetryForm({ ...telemetryForm, enabled: e.target.checked })
+                }
+              />
+              <span>启用上报（心跳 60s / 用量 10min）</span>
+            </label>
+          </div>
+          {telemetryStatus?.running && (
+            <div className="ent-warn">引擎运行中，遥测已随引擎启停</div>
+          )}
+          {telemetryStatus && telemetryStatus.queueSize > 0 && (
+            <div className="ent-hint">离线待补发 {telemetryStatus.queueSize} 条</div>
+          )}
+          <div className="ent-activate-row">
+            <button className="ent-btn" onClick={saveTelemetry} disabled={busy}>
+              保存配置
+            </button>
+            <button className="ent-btn ent-btn-small" onClick={flushTelemetry} disabled={busy}>
+              立即补发
+            </button>
+          </div>
+        </div>
+        <p className="ent-hint">
+          配置后需重启引擎生效。上报内容仅含用量统计/心跳/错误码，不含聊天与客户内容。
+        </p>
       </section>
     </div>
   )

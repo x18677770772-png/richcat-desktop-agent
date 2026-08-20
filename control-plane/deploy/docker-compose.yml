@@ -1,0 +1,67 @@
+version: '3.8'
+
+# 财听猫中央管理后台（控制面）—— docker compose 单栈部署
+# 目标环境：腾讯云 129.226.204.240（复用系统 nginx 反代，本 compose 不启动 nginx 容器）
+# 用法：docker compose -f control-plane/deploy/docker-compose.yml up -d --build
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: richcat-pg
+    environment:
+      POSTGRES_USER: richcat
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?请设置 PG_PASSWORD 环境变量}
+      POSTGRES_DB: richcat_control
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"   # 仅本机可访问，不暴露公网
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U richcat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    container_name: richcat-redis
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?请设置 REDIS_PASSWORD 环境变量}"]
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"   # 仅本机可访问
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: richcat-control-server
+    environment:
+      HTTP_ADDR: :8080
+      PG_DSN: "postgres://richcat:${PG_PASSWORD}@postgres:5432/richcat_control?sslmode=disable"
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?请设置 JWT_SECRET 环境变量}
+      SITE_TOKENS: ${SITE_TOKENS}       # 逗号分隔的企业站点 Token（Agent 上报用）
+      ALERT_WEBHOOK_URLS: ${ALERT_WEBHOOK_URLS}  # 逗号分隔的钉钉/企微/飞书 webhook
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@richcat.ai}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"   # 仅本机可访问（nginx 反代），不暴露公网
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+  redis_data:

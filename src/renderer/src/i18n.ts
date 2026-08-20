@@ -7,7 +7,7 @@ const translations = {
   zh: {
     // Header
     'app.title': '财听猫 RichCat',
-    'app.version': 'v1.1.0',
+    'app.version': 'v2.0.0-alpha.2',
 
     // Tabs
     'tab.control': '控制',
@@ -68,7 +68,7 @@ const translations = {
   },
   en: {
     'app.title': 'RichCat',
-    'app.version': 'v1.1.0',
+    'app.version': 'v2.0.0-alpha.2',
 
     'tab.control': 'Control',
     'tab.settings': 'Settings',

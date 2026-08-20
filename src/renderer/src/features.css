@@ -384,3 +384,28 @@
 .ent-audit-system { color: #8a94a3; }
 .ent-audit-action { color: var(--text-primary, #e8ecf4); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; }
 .ent-audit-detail { color: var(--text-secondary, #aeb6c4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ════════════════════ 总后台接入（遥测） ════════════════════ */
+.ent-telemetry-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ent-telemetry-form .ent-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ent-telemetry-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary, #aeb6c4);
+  cursor: pointer;
+}
+.ent-telemetry-toggle input[type='checkbox'] {
+  accent-color: #1ba69e;
+  width: 16px;
+  height: 16px;
+}

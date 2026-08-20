@@ -93,6 +93,8 @@ import {
 // ── 企业版：License / 审计 / 用量 / 密钥加密 门面（E2-E6）──
 import { createEnterpriseServices, EnterpriseServices } from '../core/enterprise'
 import type { AuditFilter } from '../core/enterprise/audit'
+// ── 总后台：Agent 遥测 SDK（C1）──
+import { TelemetryClient } from '../core/enterprise/telemetry'
 const StoreClass = typeof Store === 'function' ? Store : ((Store as any).default as typeof Store)
 
 // ── 多开支持：--profile=<name> 数据隔离 ──
@@ -172,6 +174,14 @@ interface AppSettings {
     deviceId?: string
     masterKey?: string
   }
+  // 总后台遥测（Agent 上报到中央控制面；默认关）
+  telemetry?: {
+    enabled?: boolean
+    controlPlaneUrl?: string
+    siteToken?: string
+    tenantId?: string
+    siteId?: string
+  }
 }
 
 type ProviderConfigFieldType = 'text' | 'password' | 'url' | 'select' | 'textarea'
@@ -239,7 +249,8 @@ const settingsStore = new StoreClass({
     defaultCaptureStrategy: 'auto',
     capture: {},
     featuresConfig: {},
-    enterprise: { deviceId: '', masterKey: '' }
+    enterprise: { deviceId: '', masterKey: '' },
+    telemetry: { enabled: false, controlPlaneUrl: '', siteToken: '', tenantId: '', siteId: '' }
   }
 })
 
@@ -695,6 +706,72 @@ function withDecryptedKeys(settings: AppSettings): AppSettings {
       }
     }
   }
+}
+
+// ── 总后台：Agent 遥测单例（C1）—— 设置里配 controlPlaneUrl/siteToken，默认关 ──
+let telemetryClientInstance: TelemetryClient | null = null
+
+function getTelemetryClient(): TelemetryClient | null {
+  const raw = normalizeSettings(settingsStore.store).telemetry
+  const t = {
+    enabled: raw?.enabled === true,
+    controlPlaneUrl: raw?.controlPlaneUrl?.trim() ?? '',
+    siteToken: raw?.siteToken?.trim() ?? '',
+    tenantId: raw?.tenantId?.trim() ?? '',
+    siteId: raw?.siteId?.trim() ?? ''
+  }
+  if (!t.enabled || !t.controlPlaneUrl || !t.siteToken) {
+    return null
+  }
+  if (!telemetryClientInstance) {
+    const ent = getEnterpriseServices()
+    telemetryClientInstance = new TelemetryClient(
+      {
+        controlPlaneUrl: t.controlPlaneUrl.trim(),
+        siteToken: t.siteToken.trim()
+      },
+      {
+        tenantId: t.tenantId?.trim() || 'default',
+        siteId: t.siteId?.trim() || 'default',
+        agentId: ent.deviceId, // 用设备指纹作为 agent 标识（云端按 HMAC 归类）
+        deviceId: ent.deviceId,
+        vlm: normalizeSettings(settingsStore.store).vision.model?.trim() || 'unknown',
+        llm: normalizeSettings(settingsStore.store).chatProvider.config?.model?.trim() || 'unknown',
+        getSystemInfo: () => {
+          return {
+            agentVersion: app.getVersion(),
+            os: `${process.platform}-${process.arch}`,
+            cpuPct: 0,
+            memPct: 0,
+            diskFreeGb: 0,
+            wechatState: 'unknown'
+          }
+        },
+        getUsage: () => {
+          const snap = ent.usage.getToday()
+          return {
+            date: snap.date,
+            sessions: snap.sessions,
+            messages: snap.messages,
+            replies: snap.replies,
+            handoffs: snap.handoffs,
+            apiCalls: snap.apiCalls
+          }
+        }
+      }
+    )
+    console.log('[Telemetry] Agent 遥测客户端已初始化')
+  }
+  return telemetryClientInstance
+}
+
+/** 引擎启动/停止时启停遥测；返回当前是否启用（供 UI 显示）。 */
+function syncTelemetryRunning(running: boolean): boolean {
+  const client = getTelemetryClient()
+  if (!client) return false
+  if (running) client.start()
+  else client.stop()
+  return true
 }
 
 function createWindow(): void {
@@ -1630,6 +1707,39 @@ app.whenReady().then(async () => {
   ipcMain.handle('enterprise:usage:isQuotaExceeded', async () => ent().usage.isQuotaExceeded())
   ipcMain.handle('enterprise:usage:overageMessage', async () => ent().usage.overageMessage())
 
+  // ── 总后台：遥测 IPC（设置页读/写；getStatus 供 UI 显示是否已连接）──
+  ipcMain.handle('telemetry:getConfig', async () => {
+    const t = normalizeSettings(settingsStore.store).telemetry
+    return { ...t }
+  })
+  ipcMain.handle('telemetry:setConfig', async (_event, cfg) => {
+    const next = {
+      enabled: cfg?.enabled === true,
+      controlPlaneUrl: typeof cfg?.controlPlaneUrl === 'string' ? cfg.controlPlaneUrl.trim() : '',
+      siteToken: typeof cfg?.siteToken === 'string' ? cfg.siteToken.trim() : '',
+      tenantId: typeof cfg?.tenantId === 'string' ? cfg.tenantId.trim() : '',
+      siteId: typeof cfg?.siteId === 'string' ? cfg.siteId.trim() : ''
+    }
+    settingsStore.set('telemetry', next)
+    // 配置变更 → 重建客户端（下次引擎启停生效）
+    telemetryClientInstance = null
+    return { success: true }
+  })
+  ipcMain.handle('telemetry:getStatus', async () => {
+    const client = getTelemetryClient()
+    return {
+      configured: client !== null,
+      running: runtime?.isRunning() ?? false,
+      queueSize: client?.queueSize() ?? 0
+    }
+  })
+  ipcMain.handle('telemetry:flushQueue', async () => {
+    const client = getTelemetryClient()
+    if (!client) return { ok: false, error: '遥测未启用' }
+    const sent = await client.flushQueue()
+    return { ok: true, sent }
+  })
+
   // ── F6 服务日报装配（定时器仅 f6 flag 开时注册；before-quit 清理在 install 内部）──
   dailyReportHandle = installDailyReport({
     flags: featureFlags,
@@ -1850,6 +1960,8 @@ async function startEngineCore(rawConfig?: any): Promise<SkillStartResult> {
     // ── 企业版：用量计量（会话启动计数）+ 审计（仅在真正启动成功后记录）──
     getEnterpriseServices().usage.recordSession('start')
     getEnterpriseServices().audit.record('engine.start', 'user', '引擎启动')
+    // ── 总后台：遥测心跳随引擎启停（未配置则 no-op）──
+    syncTelemetryRunning(true)
 
     runtime.startSession().catch((err: any) => {
       console.error('[Main] Runtime session error:', err)
@@ -1876,6 +1988,8 @@ async function stopEngineCore(stopReason: string): Promise<SkillPauseResult> {
     // ── 企业版：用量计量（会话停止）+ 审计 ──
     getEnterpriseServices().usage.recordSession('stop')
     getEnterpriseServices().audit.record('engine.stop', 'system', '引擎停止', { stopReason })
+    // ── 总后台：遥测停止 ──
+    syncTelemetryRunning(false)
     runtimeProvider = null
     notifyEngineStateChanged('idle')
     return { ok: true }
@@ -2151,6 +2265,15 @@ function normalizeSettings(raw: any): AppSettings {  const oldApiKey = typeof ra
         typeof raw?.enterprise?.deviceId === 'string' ? raw.enterprise.deviceId : '',
       masterKey:
         typeof raw?.enterprise?.masterKey === 'string' ? raw.enterprise.masterKey : ''
+    },
+    telemetry: {
+      enabled: raw?.telemetry?.enabled === true,
+      controlPlaneUrl:
+        typeof raw?.telemetry?.controlPlaneUrl === 'string' ? raw.telemetry.controlPlaneUrl : '',
+      siteToken:
+        typeof raw?.telemetry?.siteToken === 'string' ? raw.telemetry.siteToken : '',
+      tenantId: typeof raw?.telemetry?.tenantId === 'string' ? raw.telemetry.tenantId : '',
+      siteId: typeof raw?.telemetry?.siteId === 'string' ? raw.telemetry.siteId : ''
     }
   }
 }
