@@ -5,7 +5,7 @@
 // 事件实时推送新步骤，打开本窗口可以看着轨迹一条条长出来。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import logoUrl from './assets/logo.png'
+import richcatIconUrl from './assets/richcat-icon.png'
 import { showToast } from './App'
 
 // ── 与 src/core/trace / memory 对齐的本地类型（renderer 约定：不跨层 import） ──
@@ -213,9 +213,9 @@ export default function MemoryWindow(): React.JSX.Element {
   return (
     <div className="memory-shell">
       <aside className="memory-sidebar">
-        <div className="settings-sidebar-brand">
-          <img src={logoUrl} alt="财听猫" className="app-logo" />
-          <span>工作记忆</span>
+        <div className="sidebar-brand">
+          <img src={richcatIconUrl} alt="财听猫" className="app-logo" />
+          <span className="brand-wordmark">RichCat</span>
         </div>
 
         <button

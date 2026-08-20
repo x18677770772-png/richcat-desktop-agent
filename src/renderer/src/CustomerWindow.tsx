@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { showToast } from './App'
+import richcatIconUrl from './assets/richcat-icon.png'
 
 interface CustomerMemoryEntry {
   ts: number
@@ -143,6 +144,10 @@ export default function CustomerWindow(): React.JSX.Element {
   return (
     <div className="crm-window">
       <aside className="crm-sidebar">
+        <div className="sidebar-brand">
+          <img src={richcatIconUrl} alt="财听猫" className="app-logo" />
+          <span className="brand-wordmark">RichCat</span>
+        </div>
         <div className="crm-sidebar-header">
           <h3>客户</h3>
           <span className="crm-count">{stats?.total ?? 0} 位</span>

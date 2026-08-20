@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { t } from './i18n'
-import logoUrl from './assets/logo.png'
+import richcatIconUrl from './assets/richcat-icon.png'
 import MemoryWindow from './MemoryWindow'
 import KnowledgeWindow from './KnowledgeWindow'
 import CustomerWindow from './CustomerWindow'
@@ -340,7 +340,10 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <img src={logoUrl} alt="财听猫" className="app-logo" />
+        <div className="brand-lockup">
+          <img src={richcatIconUrl} alt="财听猫" className="app-logo" />
+          <span className="brand-wordmark">RichCat</span>
+        </div>
       </header>
 
       <div className="app-content">
@@ -464,8 +467,8 @@ function ControlPanel({
   const captureReady = isVlm || regions !== null
 
   return (
-    <div className="fade-in">
-      <div className={`status-indicator ${status}`}>
+    <div className="fade-in fade-in-up">
+      <div className={`status-indicator glass-card-highlight ${status}`}>
         <div className={`status-dot ${status}`} />
         <span className="status-text">{statusLabel}</span>
       </div>
@@ -481,7 +484,7 @@ function ControlPanel({
         onOpenWizard={handleOpenWizard}
       />
 
-      <div className="card">
+      <div className="card glass-card">
         <div className="card-title">{t('control.log')}</div>
         <div className="message-log" ref={logRef}>
           {logs.length === 0 ? (
@@ -532,7 +535,7 @@ function TargetAppQuickCard({
       : '尚未框选'
 
   return (
-    <div className="card" style={{ marginBottom: 12 }}>
+    <div className="card glass-card" style={{ marginBottom: 12 }}>
       <div className="card-title">目标应用</div>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -595,23 +598,16 @@ function TargetAppQuickCard({
       </div>
 
       <div
-        className="form-hint"
+        className={`form-hint capture-status-text ${captureReady ? 'ready' : 'notready'}`}
         style={{
           marginTop: 10,
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
-          color: captureReady ? '#94a3b8' : '#fbbf24'
+          gap: 8
         }}
       >
         <span
-          style={{
-            display: 'inline-block',
-            width: 8,
-            height: 8,
-            borderRadius: 999,
-            background: captureReady ? '#34d399' : '#fbbf24'
-          }}
+          className={`capture-status-dot ${captureReady ? 'ready' : 'notready'}`}
         />
         {statusText}
         {!isVlm && !regions ? '：点右侧按钮先把 3 个关键区域圈出来' : ''}
@@ -738,9 +734,9 @@ function SettingsWindow(): React.JSX.Element {
   return (
     <div className="settings-shell">
       <aside className="settings-sidebar">
-        <div className="settings-sidebar-brand">
-          <img src={logoUrl} alt="财听猫" className="app-logo" />
-          <span>设置</span>
+        <div className="sidebar-brand">
+          <img src={richcatIconUrl} alt="财听猫" className="app-logo" />
+          <span className="brand-wordmark">RichCat</span>
         </div>
         <button
           className={`settings-nav-item ${section === 'base' ? 'active' : ''}`}

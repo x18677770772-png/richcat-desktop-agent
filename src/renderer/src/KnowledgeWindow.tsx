@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { showToast } from './App'
+import richcatIconUrl from './assets/richcat-icon.png'
 
 interface KnowledgeItem {
   itemId: string
@@ -135,7 +136,11 @@ export default function KnowledgeWindow(): React.JSX.Element {
   return (
     <div className="kb-window">
       <header className="kb-header">
-        <div>
+        <div className="kb-brand-title">
+          <div className="sidebar-brand">
+            <img src={richcatIconUrl} alt="财听猫" className="app-logo" />
+            <span className="brand-wordmark">RichCat</span>
+          </div>
           <h3>知识库</h3>
           <p className="kb-hint">
             运行时注入客服回复 prompt（最多 {items.filter((i) => i.enabled).length} 条启用中，上限 30 条）
