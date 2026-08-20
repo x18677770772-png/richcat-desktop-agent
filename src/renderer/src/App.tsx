@@ -344,6 +344,7 @@ function App() {
           <img src={richcatIconUrl} alt="财听猫" className="app-logo" />
           <span className="brand-wordmark">RichCat</span>
         </div>
+        <span className="version">{t('app.version')}</span>
       </header>
 
       <div className="app-content">

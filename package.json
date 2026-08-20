@@ -1,7 +1,7 @@
 {
   "name": "richcat-desktop-agent",
   "productName": "RichCat",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "财听猫 RichCat - AI 微信客服系统（AI WeChat Customer-Service Agent based on Electron and VLM）",
   "main": "./out/main/index.js",
   "author": "richcat",
